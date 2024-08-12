@@ -47,43 +47,35 @@ def extract_main_parts_with_ending_ngrams(transcription = None):
     return results["titles"]
 
 
+def show_contents(structure, save_path= None): 
 
-def show_contents(transcription, titles_and_closing):  
-    start_indexes = [0]
-    end_indexes = []
-    for i, (t, c) in enumerate(titles_and_closing):
-        end_index = transcription.find(c)
-        end_indexes.append(end_index)
-        if i < len(titles_and_closing) - 1:
-            start_indexes.append(end_index)
-    
-    # Calculate word counts
-    word_counts = []
-    for start, end in zip(start_indexes, end_indexes):
-        section_text = transcription[start:end]
-        word_count = len(section_text.split())
-        word_counts.append(word_count)
-    
-    print('Start: {} \nEnd: {}'.format(start_indexes, end_indexes))
     # Plotting
-    fig, ax = plt.subplots(figsize=(12, len(titles_and_closing) * 0.5))
-    y_positions = range(len(titles_and_closing))
+    fig, ax = plt.subplots(figsize=(12, len(structure) * 0.5))
+    y_positions = range(len(structure))
     bar_heights = 0.3
 
-    for i, (start, end, title, word_count) in enumerate(zip(start_indexes, end_indexes, titles_and_closing, word_counts)):
+    # for i, (start, end, title, word_count) in enumerate(zip(
+    for i,s in enumerate(structure):
+        start = s['start_index']
+        end = s['end_index']
+        word_count = s['nb_words']
+        title = s['title']
+
         ax.barh(i, end - start, left=start, height=bar_heights, align='center', 
                 alpha=0.8, label=f"{title[0]} ({word_count} words)")
     ax.set_yticks(y_positions)
-    ax.set_yticklabels([t[0] for t in titles_and_closing])
+    ax.set_yticklabels([s['title'] for s in structure])
     ax.invert_yaxis()  # labels read top-to-bottom
     ax.set_xlabel('Character Position in Transcription')
     ax.set_title('Span of Snippets in Transcription')
 
     # Add legend with word counts
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), title="Sections (Word Count)")
-
     plt.tight_layout()
-    plt.show()
+    if save_path is not None:
+        plt.savefig(save_path)
+    else: 
+        plt.show()
 
 
 def set_indexes(config):
@@ -91,12 +83,13 @@ def set_indexes(config):
     complete_structure = json.load(open(config['structure_path'])) 
 
     # collecting indexes 
-    results = [{"title": s[0], 'closing': s[1], 'start_index': 0, 'end_index': 0} for s in complete_structure['structure']]
+    results = [{"title": s[0], 'closing': s[1], 'start_index': 0, 'end_index': 0, 'nb_words': 0} for s in complete_structure['structure']]
     start_index = 0 
     for i, s in enumerate(complete_structure['structure']):
         end_index = complete_structure['initial_content'].find(s[1])        
         results[i]['start_index'] = start_index
-        results[i]['end_index'] = end_index
+        results[i]['end_index'] = end_index + len(s[1])
+        results[i]['nb_words'] = len(complete_structure['initial_content'][start_index:end_index].split())
 
         start_index = end_index
     
@@ -121,6 +114,8 @@ def run_checks(config):
             s['start_index'] = prev_struct['end_index'] if i > 0 else 0
         else: 
             print('Fine for {}'.format(s['title']))
+        s['nb_words'] = len(structure['initial_content'][s['start_index']:s['end_index']].split())  
+    
     
     momeutils.crline(json.dumps(structure['structure'], indent = 4))    
     return structure
@@ -130,10 +125,14 @@ def to_graph(config):
     structure = json.load(open(config['structure_path']))
     vault_path = config['interactive_graph_path']
 
+    im_path = os.path.join(vault_path, 'contents_{}.png'.format(config['current_base_hash']))
+    show_contents(structure['structure'], save_path = im_path)
+
     mome.init_obsidian_vault(vault_path, exists_ok = True)
     node_seq = []
     node_seq.append(mome.add_node_to_graph(vault_path, 
-                                           {"Recap": "```json\n{}\n```".format(json.dumps(structure['structure'], indent = 4)), 
+                                           {"Viz": "![[{}]]".format(os.path.basename(im_path)), 
+                                            "Recap": "```json\n{}\n```".format(json.dumps(structure['structure'], indent = 4)), 
                                             "Initial contents": structure['initial_content']},
                                            tags = ['anchor'], 
                                            name_override = mome.get_short_hash(structure['initial_content'], 15),
@@ -145,8 +144,60 @@ def to_graph(config):
                                                parent_path = node_seq[-1], 
                                                name_override = "{}_{}".format(s['title'].lower().replace(' ', '_'), os.path.basename(node_seq[0]).split('.')[0]), 
                                                use_hash = False))
-    
 
+def regen_graph(config_path, **kwargs):   
+    config = load_config(config_path, **kwargs)
+    to_graph(config)
+
+def merge(config_path, **kwargs): 
+    config = load_config(config_path, **kwargs)
+    
+    structure = json.load(open(config['structure_path']))['structure']
+
+    min_, max_ = config['words_tolerance']
+    proposed_merges = []
+    for i, s in enumerate(structure): 
+        if len(proposed_merges)> 0:
+            if i <= max(proposed_merges[-1]):
+                continue
+
+        if i < len(structure) - 1:
+            
+            if s['nb_words'] < min_: 
+                print('Checking snippet {}: {} - nb_words: {}'.format(i, s['title'], s['nb_words']))  
+                total_words = s['nb_words'] 
+                j = i
+                while total_words < min_ and j < len(structure) - 1:
+                    j += 1
+                    total_words += structure[j]['nb_words']
+                proposed_merges.append((i, j))
+    
+    accepted=  momeutils.uinput('Proposed_merges: {}'.format(proposed_merges))
+    
+    if accepted.strip().lower() == "y": 
+        new_structure, idx_to_remove = do_merge(structure, proposed_merges)
+        clean_idx(idx_to_remove, config)
+
+        structure = json.load(open(config['structure_path']))
+        structure['structure'] = new_structure
+        save_current_structure(structure, config)
+        to_graph(config)
+
+def do_merge(structure, proposed_merges): 
+
+    new_structure = structure.copy()    
+    to_drop = []
+    for i, j in proposed_merges:
+        new_structure[i]['title'] = ' '.join([s['title'] for s in structure[i:j+1]])
+        new_structure[i]['end_index'] = structure[j]['end_index']
+        new_structure[i]['nb_words'] = sum([s['nb_words'] for s in structure[i:j+1]])
+
+        to_drop.extend(list(range(i+1, j+1)))
+
+    print('Dropping: {}'.format(to_drop))
+    new_structure = [s for i, s in enumerate(new_structure) if i not in to_drop]
+    return new_structure, to_drop
+    
     
 def get_base_structure(structure = None, initial_contents = None):
     return {"structure": structure, "initial_content": initial_contents}
@@ -159,6 +210,7 @@ def init_config_file(config_path):
         "current_base_hash": None, 
         "operating_modules": None, 
         "clipboard_contents": momeutils.get_clipboard(),
+        "words_tolerance": [160,300]
     }
 
     with open(config_path, 'w') as f:
@@ -169,13 +221,16 @@ def load_config(config_path, **kwargs):
         init_config_file(config_path)
     with open(config_path, 'r') as f:
         config = json.load(f)
-    nb_upates = 0 
+    nb_updates = 0 
     for k,v in kwargs.items():  
         if k in config.keys():
-            nb_upates += 1
+            nb_updates += 1
             config[k] = v
-    
-    if nb_upates > 0:
+            if k == "base_contents_path": 
+                config['current_base_hash'] = mome.get_short_hash(open(kwargs['base_contents_path']).read(), 15)
+                nb_updates += 1 
+
+    if nb_updates > 0:
         momeutils.crline('Updated config file')
     save_config(config, config_path)
     

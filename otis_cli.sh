@@ -83,3 +83,64 @@ if [ "$1" = "build" ]; then
     eval $command
 fi 
 
+if [ "$1" = "regen_graph" ]; then 
+
+    base_contents_path=None
+    structure_file=None
+    interactive_graph_path=None
+
+    while [ $# -gt 1 ]; do 
+        case $1 in 
+            --d) 
+                base_contents_path="$2"
+                shift 2
+                ;;
+            --s) 
+                structure_file="$2"
+                shift 2
+                ;;
+            --g) 
+                interactive_graph_path="$2"
+                shift 2
+                ;;
+            *) 
+                shift 1
+                ;;
+        esac 
+    done
+
+    command=$(make_command "regen_graph" $local_file_path $base_contents_path $structure_file $interactive_graph_path)
+
+    eval $command
+fi 
+
+if [ "$1" = "merge" ]; then 
+
+    base_contents_path=None
+    structure_file=None
+    interactive_graph_path=None
+
+    while [ $# -gt 1 ]; do 
+        case $1 in 
+            --d) 
+                base_contents_path="$2"
+                shift 2
+                ;;
+            --s) 
+                structure_file="$2"
+                shift 2
+                ;;
+            --g) 
+                interactive_graph_path="$2"
+                shift 2
+                ;;
+            *) 
+                shift 1
+                ;;
+        esac 
+    done
+
+    command=$(make_command "merge" $local_file_path $base_contents_path $structure_file $interactive_graph_path)
+
+    eval $command
+fi 
