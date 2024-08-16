@@ -129,11 +129,11 @@ def to_graph(config):
     im_path = os.path.join(vault_path, 'contents_{}.png'.format(config['current_base_hash']))
     show_contents(structure['structure'], save_path = im_path)
 
-    
     node_seq = []
     node_seq.append(mome.add_node_to_graph(vault_path, 
                                            {"Viz": "![[{}]]".format(os.path.basename(im_path)), 
                                             "Recap": "```json\n{}\n```".format(json.dumps(structure['structure'], indent = 4)), 
+                                            "Results structure": "", 
                                             "Initial contents": structure['initial_content']},
                                            tags = ['anchor'], 
                                            name_override = mome.get_short_hash(structure['initial_content'], 15),
@@ -293,9 +293,14 @@ def delete_hash(config_path, **kwargs):
         parent_node_to_delete = kwargs['parent_node_to_delete']
     else: 
         parent_node_to_delete = mome.select_file_in_folder(target_folder, target_tags = ['anchor'])
-    input(parent_node_to_delete)
-    mome.delete_node_dynasty(parent_node_to_delete)
+    link_sections = "\nLink result from ".join(["Links"] + mome.get_node_section(parent_node_to_delete, target_section = 'Results structure').split('\n')).split('\n')
+
+    mome.delete_node_dynasty(parent_node_to_delete, link_section = link_sections)
     
+    im_path = os.path.join(target_folder, 'contents_{}.png'.format(os.path.basename(parent_node_to_delete).split('.')[0]))
+    if os.path.exists(im_path): 
+        os.remove(im_path)
+
 
 def apply(config_path, **kwargs): 
     config = load_config(config_path, **kwargs)
@@ -305,16 +310,26 @@ def apply(config_path, **kwargs):
         return 
     
     func = getattr(otis_tools, config['apply_func'])
+
+    # Enhancing the root node with the Result section with the function name for downstream tracking (or deletion)
+    root_node = os.path.join(config['interactive_graph_path'], '{}.md'.format(config['current_base_hash']))
+    current_contents = mome.get_node_section(root_node, target_section = 'Results structure')
+    if current_contents is None:
+        current_contents = ""
+    current_contents = current_contents.strip().split('\n')
+    current_contents.append(config['apply_func'].strip())
+
+    mome.update_section(root_node, 'Results structure', '\n'.join(current_contents))
+    
+
     for node in target_dynasty:
         contents = mome.get_node_section(node)
         out = func(contents)
         r_node = mome.add_node_to_graph(config['interactive_graph_path'], "That's the results {}".format(out), 
                                         name_override = 'result_{}_{}'.format(config['apply_func'], os.path.basename(node).split('.')[0]),
                                         tags = ['results_{}'.format(config['apply_func'])]) 
-        input(r_node)
         mome.enhance_links(node, os.path.basename(r_node).split('.')[0], link_section = 'Link result from {}'.format(config['apply_func']))
-        print(mome.get_node_section(node, "Link result from {}".format(config['apply_func'])))
-        input(' ok ? ')
+        
         
         
 
@@ -330,21 +345,8 @@ if __name__ == "__main__":
         print('Loading from safe')
         shutil.rmtree(tp)
         shutil.copytree(safe, tp)
-    input(' ok ? ')
+
     apply("/home/mehdimounsif/.local/bin/otis_config.json") 
+    input('ok ? ')
+    delete_hash("/home/mehdimounsif/.local/bin/otis_config.json")
 
-
-
-    # Get the transcription from the clipboard
-    # transcription = open("/home/mehdimounsif/recordings/recording_FlorentRodolpheCIRClientEDF.txt").read()
-    # # structure = get_base_structure(extract_main_parts_with_ending_ngrams(transcription), transcription)
-    
-    # # with open(os.path.join(os.path.dirname(__file__), 'results.json'), 'w') as f:
-    # #     json.dump(structure, f, indent = 4)
-    # structure = json.load(open(os.path.join(os.path.dirname(__file__), 'results.json')))
-    # structure = set_indexes(structure)
-    # print(json.dumps(structure['structure'], indent = 4))
-    # structure = run_checks(structure)   
-    # print(json.dumps(structure['structure'], indent = 4))
-
-    # to_graph(structure)
