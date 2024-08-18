@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import glob
 import momeutils
 import otis_tools 
+from itertools import chain
 
 
 def extract_main_parts_with_ending_ngrams(transcription = None): 
@@ -41,7 +42,7 @@ def extract_main_parts_with_ending_ngrams(transcription = None):
         {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Transcription\n{}\n\n Extract main parts from the transcription and return a list of titles with their corresponding extracted ending 5-grams\n\n".format(icl_examples, transcription)}
     ]
     
-    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "pro"))
+    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
     momeutils.crprint(json.dumps(results, indent = 4))
     
     return results["titles"]
@@ -78,6 +79,24 @@ def show_contents(structure, save_path= None):
         plt.show()
 
 
+# def set_indexes(config):
+
+#     complete_structure = json.load(open(config['structure_path'])) 
+
+#     # collecting indexes 
+#     results = [{"title": s[0], 'closing': s[1], 'start_index': 0, 'end_index': 0, 'nb_words': 0} for s in complete_structure['structure']]
+#     start_index = 0 
+#     for i, s in enumerate(complete_structure['structure']):
+#         end_index = complete_structure['initial_content'].find(s[1])        
+#         results[i]['start_index'] = start_index
+#         results[i]['end_index'] = end_index + len(s[1])
+#         results[i]['nb_words'] = len(complete_structure['initial_content'][start_index:end_index].split())
+
+#         start_index = end_index
+    
+#     complete_structure['structure'] = results
+#     return complete_structure
+
 def set_indexes(config):
 
     complete_structure = json.load(open(config['structure_path'])) 
@@ -88,13 +107,20 @@ def set_indexes(config):
     for i, s in enumerate(complete_structure['structure']):
         end_index = complete_structure['initial_content'].find(s[1])        
         results[i]['start_index'] = start_index
-        results[i]['end_index'] = end_index + len(s[1])
-        results[i]['nb_words'] = len(complete_structure['initial_content'][start_index:end_index].split())
 
-        start_index = end_index
+        # Ensure end_index is at the end of a sentence
+        while end_index < len(complete_structure['initial_content']) - 1 and complete_structure['initial_content'][end_index] not in ('.', '!', '?'):
+            end_index += 1
+        results[i]['end_index'] = end_index + 1  # Include the punctuation mark
+
+        results[i]['nb_words'] = len(complete_structure['initial_content'][start_index:end_index].split())
+        results[i]['closing'] = complete_structure['initial_content'][end_index-20:end_index]
+
+        start_index = end_index +1 
     
     complete_structure['structure'] = results
     return complete_structure
+
 
 def run_checks(config):
 
@@ -196,8 +222,9 @@ def do_merge(structure, proposed_merges, retitle = True):
             momeutils.crline("Updated title: {} --> New title: {}".format(' | '.join([s['title'] for s in structure[i:j+1]]), new_title))
         else:
             new_structure[i]['title'] = ' '.join([s['title'] for s in structure[i:j+1]])
-        new_structure[i]['end_index'] = structure[j]['end_index']
+        new_structure[i]['end_index'] = structure[j]['end_index'] #+ len(structure[j]['closing'])
         new_structure[i]['nb_words'] = sum([s['nb_words'] for s in structure[i:j+1]])
+        new_structure[i]['closing'] = structure[j]['closing']
 
         to_drop.extend(list(range(i+1, j+1)))
 
@@ -285,9 +312,9 @@ def initial_build(config_path, **kwargs):
 
 
 def delete_hash(config_path, **kwargs): 
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    
+   
+    config = load_config(config_path, **kwargs)
+
     target_folder = config['interactive_graph_path']
     if "parent_node_to_delete" in kwargs.keys():
         parent_node_to_delete = kwargs['parent_node_to_delete']
@@ -301,36 +328,100 @@ def delete_hash(config_path, **kwargs):
     if os.path.exists(im_path): 
         os.remove(im_path)
 
+def clean_hash(config_path, **kwargs):
+
+    config= load_config(config_path, **kwargs)
+    target_folder = config['interactive_graph_path']
+    
+    if "parent_node_to_delete" in kwargs.keys():
+        parent_node_to_delete = kwargs['parent_node_to_delete']
+    else:
+        parent_node_to_delete = mome.select_file_in_folder(target_folder, target_tags = ['anchor'])
+    
+    # COLLECTING LINK SECTIONS 
+    link_sections = "\nLink result from ".join([""] + mome.get_node_section(parent_node_to_delete, target_section = 'Results structure').split('\n')).split('\n')
+    node_dynasty = mome.collect_dynasty_paths(parent_node_to_delete)   
+
+    to_remove = []
+    for node in node_dynasty:
+        for link_section in link_sections:
+            if link_section.strip() == "":
+                continue
+            target_nodes = mome.get_node_section(node, target_section = link_section)
+            if target_nodes is None:
+                continue
+
+            target_nodes = mome.collect_dynasty_paths(node, link_sections, include_root = False)
+            to_remove.extend(target_nodes)
+       
+       
+            mome.remove_section(node, link_section) 
+    for tr in to_remove: 
+        if os.path.exists(tr): 
+            os.remove(tr)
+
+
 
 def apply(config_path, **kwargs): 
     config = load_config(config_path, **kwargs)
-    target_dynasty = mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], '{}.md'.format(config['current_base_hash'])))
+    target_dynasty = mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], '{}.md'.format(config['current_base_hash'])), include_root = False)
     if config['apply_func'] is None:
         momeutils.crline('No apply function specified')
         return 
     
-    func = getattr(otis_tools, config['apply_func'])
+    
+    # flatten config['apply_func'] to be able to load more arbitrary functions
+    all_funcs = list(chain(*[item if isinstance(item, list) else [item] for item in config['apply_func']]))
+    for func_name in all_funcs:
 
-    # Enhancing the root node with the Result section with the function name for downstream tracking (or deletion)
-    root_node = os.path.join(config['interactive_graph_path'], '{}.md'.format(config['current_base_hash']))
-    current_contents = mome.get_node_section(root_node, target_section = 'Results structure')
-    if current_contents is None:
-        current_contents = ""
-    current_contents = current_contents.strip().split('\n')
-    current_contents.append(config['apply_func'].strip())
+        # Enhancing the root node with the Result section with the function name for downstream tracking (or deletion)
+        root_node = os.path.join(config['interactive_graph_path'], '{}.md'.format(config['current_base_hash']))
+        current_contents = mome.get_node_section(root_node, target_section = 'Results structure')
+        if current_contents is None:
+            current_contents = ""
+        current_contents = current_contents.strip().split('\n')
+        current_contents.append(func_name)
 
-    mome.update_section(root_node, 'Results structure', '\n'.join(current_contents))
+        mome.update_section(root_node, 'Results structure', '\n'.join(current_contents))
     
 
     for node in target_dynasty:
-        contents = mome.get_node_section(node)
-        out = func(contents)
-        r_node = mome.add_node_to_graph(config['interactive_graph_path'], "That's the results {}".format(out), 
-                                        name_override = 'result_{}_{}'.format(config['apply_func'], os.path.basename(node).split('.')[0]),
-                                        tags = ['results_{}'.format(config['apply_func'])]) 
-        mome.enhance_links(node, os.path.basename(r_node).split('.')[0], link_section = 'Link result from {}'.format(config['apply_func']))
-        
-        
+        for c in config['apply_func']:
+            do_apply(c, node, config)
+        # for c in config['apply_func']:
+        #     if isinstance(c, list):
+        #         do_apply(c, node, config)
+        #     else:
+        #         do_apply(c, node, config)
+
+
+def do_apply(current_func, base_node, config):
+    if isinstance(current_func, list):
+        current_node = base_node
+        for func in current_func:
+            if isinstance(func, list):
+                # Recursive case: apply the nested list
+                current_node = do_apply(func, current_node, config)
+            else:
+                # Apply the function to the current node
+                print(f'Applying {func} to {os.path.basename(current_node)}')
+                out = getattr(otis_tools, func)(mome.get_node_section(current_node))
+                r_node = mome.add_node_to_graph(config['interactive_graph_path'], out, 
+                                                name_override=f'result_{func}_{os.path.basename(current_node).split(".")[0]}',
+                                                tags=[f'results_{func}'])
+                mome.enhance_links(current_node, os.path.basename(r_node).split('.')[0], link_section=f'Link result from {func}')
+                current_node = r_node
+        return current_node
+    else:
+        # Direct function case: apply to the base node
+        print(f'Direct function, Applying {current_func} to {os.path.basename(base_node)}')
+        out = getattr(otis_tools, current_func)(mome.get_node_section(base_node))
+        r_node = mome.add_node_to_graph(config['interactive_graph_path'], out, 
+                                        name_override=f'result_{current_func}_{os.path.basename(base_node).split(".")[0]}',
+                                        tags=[f'results_{current_func}'])
+        mome.enhance_links(base_node, os.path.basename(r_node).split('.')[0], link_section=f'Link result from {current_func}')
+        return r_node
+
         
 
 if __name__ == "__main__":
@@ -348,5 +439,6 @@ if __name__ == "__main__":
 
     apply("/home/mehdimounsif/.local/bin/otis_config.json") 
     input('ok ? ')
-    delete_hash("/home/mehdimounsif/.local/bin/otis_config.json")
+    clean_hash("/home/mehdimounsif/.local/bin/otis_config.json")
+    # delete_hash("/home/mehdimounsif/.local/bin/otis_config.json")
 

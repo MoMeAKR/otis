@@ -144,3 +144,8 @@ if [ "$1" = "merge" ]; then
 
     eval $command
 fi 
+
+if [ "$1" = "remove" ]; then 
+    command="python -c 'import otis; otis.delete_hash(\"$local_file_path\")'"
+    eval $command
+fi
