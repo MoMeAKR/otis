@@ -315,9 +315,12 @@ def setup_control_params(suggested_sections):
     else: 
         raise TypeError('Unrecognized type in setup control params for :{}'.format(type(suggested_sections)))
     
-    return {part: {"user_instruction" : None, 
-                              "additional_details": None, 
-                              "template": "default"} for part in parts}
+    return {part: get_default_section_dict() for part in parts}
+
+def get_default_section_dict(): 
+    return {"user_instruction" : None, 
+        "additional_details": None, 
+        "template": "default"}
 
 def get_current_report_config(config):
 
@@ -387,6 +390,84 @@ def focus_sir(config_path=None, **kwargs):
     config['current_report_section_target'] = focus_node_name
     save_config(config, config_path)
     return path
+
+def node_refinement(config_path = None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    focus_node_path = os.path.join(config['interactive_graph_path'], config['current_report_section_target'] + ".md")
+    done = False 
+    while not done: 
+        user_instruct = momeutils.uinput("Whatcha want ", parse_cmd = False)
+        if user_instruct == 'q':
+            done = True
+        else:
+            # base_contents = momeutils.parse_json(mome.get_node_section(focus_node_path))
+            valid, new_contents, new_control_contents = process_node_refinement_user_instruct(focus_node_path, user_instruct)
+
+            if valid: 
+                mome.update_section(focus_node_path, "Base contents", momeutils.j_deco(new_contents))
+                mome.update_section(focus_node_path, "Control center", momeutils.j_deco(new_control_contents))
+
+    ADD LATEST UDPATES TO THE CONFIG SO WE CAN HAVE A "DEVELOP" COMMAND TO ENHANCE 
+
+
+def node_refinement_command(focus_node_path, user_instruct): 
+    """
+    available commands: add (that's it for now)
+    """
+
+    valid = True
+    base_contents = momeutils.parse_json(mome.get_node_section(focus_node_path))
+    control_contents = momeutils.parse_json(mome.get_node_section(focus_node_path, "Control center"))
+    # parse command  
+    cmd_part = user_instruct.split('|')[0]
+    cmd, section_to_insert, insert_at_idx = cmd_part.split('!')[1].split(',')
+
+    if not insert_at_idx.strip().isdigit(): 
+        momeutils.crline('Invalid index: {}'.format(insert_at_idx))
+        return False, base_contents, control_contents
+    
+    insert_at_idx = int(insert_at_idx.strip())
+    content_to_insert = user_instruct.split('|')[1].strip()
+    new_contents= base_contents.copy()
+    new_controls= control_contents.copy()
+
+    if cmd.strip() == "add": 
+        new_contents = dict(list(new_contents.items())[:insert_at_idx] + [(section_to_insert, content_to_insert)] + list(new_contents.items())[insert_at_idx:])
+        new_controls = dict(list(new_controls.items())[:insert_at_idx] + [(section_to_insert, get_default_section_dict())] + list(new_controls.items())[insert_at_idx:])
+    else: 
+        valid = False 
+
+    
+    return valid, new_contents, new_controls
+
+# TMP 
+def process_node_refinement_user_instruct(focus_node_path, user_instruct):
+    """
+    if starts with !, add key 
+    """
+    if user_instruct.strip().startswith('!'): 
+        return node_refinement_command(focus_node_path, user_instruct)
+    base_contents = momeutils.parse_json(mome.get_node_section(focus_node_path))
+    control_contents = momeutils.parse_json(mome.get_node_section(focus_node_path, "Control center"))
+
+    available_keys = list(base_contents.keys())
+    valid = False 
+    resulting_contents = base_contents.copy()
+    if '|' in user_instruct: 
+        target_k = user_instruct.split('|')[0].strip()
+        if target_k in available_keys:
+            # targeted process 
+            resulting_contents[target_k] = "Hello ! "
+            valid = True
+        else: 
+            momeutils.crline('Invalid key {}'.format(target_k))
+    else:         
+        # global instruction 
+        for i, k in enumerate(resulting_contents.keys()): 
+            resulting_contents[k] = "Hello my man ! " * (i+1)
+            valid = True
+
+    return valid, resulting_contents, control_contents
 
 def node_expansion_colab(config_path = None, **kwargs): 
     config = load_config(config_path, **kwargs)
@@ -537,6 +618,10 @@ if __name__ == "__main__":
 
     # focus_sir(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "root")
 
+    # ================== Enhancing nodes 
+    node_refinement(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
+
+
     # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
     # momeutils.uinput('Change one element in the control center to "direct" and run the node_expansion_colab function again | this should be a function')
     # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub2_p2_proposedinnovation_7462b936de74962")
@@ -544,7 +629,11 @@ if __name__ == "__main__":
     # ================== Let's try to build a subsection
     # get_compilable_children(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'))
     # sub_compilation(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub2_p2_proposedinnovation_7462b936de74962")
-    sub_compilation(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
+    # sub_compilation(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
+
+
+
+
 
 
     # text = "Neural networks limitations relative to OOD samples and spurrious correlations"
