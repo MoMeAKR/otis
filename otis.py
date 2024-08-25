@@ -42,7 +42,7 @@ def extract_main_parts_with_ending_ngrams(transcription = None):
         {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Transcription\n{}\n\n Extract main parts from the transcription and return a list of titles with their corresponding extracted ending 5-grams\n\n".format(icl_examples, transcription)}
     ]
     
-    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "pro"))
     momeutils.crprint(json.dumps(results, indent = 4))
     
     return results["titles"]
@@ -78,24 +78,6 @@ def show_contents(structure, save_path= None):
     else: 
         plt.show()
 
-
-# def set_indexes(config):
-
-#     complete_structure = json.load(open(config['structure_path'])) 
-
-#     # collecting indexes 
-#     results = [{"title": s[0], 'closing': s[1], 'start_index': 0, 'end_index': 0, 'nb_words': 0} for s in complete_structure['structure']]
-#     start_index = 0 
-#     for i, s in enumerate(complete_structure['structure']):
-#         end_index = complete_structure['initial_content'].find(s[1])        
-#         results[i]['start_index'] = start_index
-#         results[i]['end_index'] = end_index + len(s[1])
-#         results[i]['nb_words'] = len(complete_structure['initial_content'][start_index:end_index].split())
-
-#         start_index = end_index
-    
-#     complete_structure['structure'] = results
-#     return complete_structure
 
 def set_indexes(config):
 
