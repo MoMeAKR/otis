@@ -640,7 +640,7 @@ def add_subnode_from_contents_control(config, focus_node_path, contents, control
         node_contents = {"Base contents": momeutils.j_deco(section_org), # AI RESULTS 
                             "Control center": momeutils.j_deco(setup_control_params(section_org)), 
                         "Section structure": momeutils.j_deco({"initial_contents": contents,  # that's the original + some controls (in case we wanna regen)
-                                                                "how_many_subs": 2, 
+                                                                "nb_subs": 2, 
                                                                 })}
         
         tag = ['sub_' + current_tag]
@@ -655,6 +655,34 @@ def add_subnode_from_contents_control(config, focus_node_path, contents, control
                                                                                 parent_hash ),
                                     use_hash = False)
     return new_part
+
+def control_center_from_base_contents(config_path = None, **kwargs): 
+
+    config = load_config(config_path, **kwargs)
+    focus_node_path = os.path.join(config['interactive_graph_path'], config['current_report_section_target'] + ".md")
+    base_contents = momeutils.parse_json(mome.get_node_section(focus_node_path))    
+    control_center = {k: get_default_section_dict() for k in base_contents.keys()}
+    mome.update_section(focus_node_path, "Control center", momeutils.j_deco(control_center))
+
+def section_struct_to_base_contents(config_path = None, **kwargs): 
+    config = load_config(config_path, **kwargs)
+    focus_node_path = os.path.join(config['interactive_graph_path'], config['current_report_section_target'] + ".md")
+    # uses the contents to determine the sections 
+    # remove node dynasty if existing 
+    structure_contents = momeutils.parse_json(mome.get_node_section(focus_node_path, "Section structure"))
+    
+    # TMP MANUAL FOR NOW !!! 
+    computed_contents = {"_".join(s.strip().split()[:2]).lower(): s for s in structure_contents['initial_contents'].split('.') if len(s.strip()) > 2}
+    # ABOVE SHOULD BE A LLM CALL  
+
+    # REMOVE NODE DYNASTY (CLEANING)
+    dynasty = mome.collect_dynasty_paths(focus_node_path, include_root = False, preserve_hierarchy = False)
+    input(dynasty)
+    
+    mome.update_section(focus_node_path, "Base contents", momeutils.j_deco(computed_contents))
+    save_config(config, config_path)
+    # HANDLES CONTROL CENTER 
+    control_center_from_base_contents(config_path)
 
 def get_compilable_children(config_path = None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -760,7 +788,7 @@ if __name__ == "__main__":
 
     # focus_sir(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "root")
 
-    node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
+    # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
     # momeutils.uinput('Change one element in the control center to "direct" and run the node_expansion_colab function again | this should be a function')
     # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub2_p2_proposedinnovation_7462b936de74962")
     # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub2_p0_overview_7462b936de74962")
@@ -772,10 +800,12 @@ if __name__ == "__main__":
     # sub_compilation(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
 
     # ================== Enhancing nodes 
-    node_refinement(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
+    # node_refinement(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
 
+    # ================== Controlling nodes: 
 
-
+    # control_center_from_base_contents(config_path=os.path.join(os.path.dirname(__file__), "sir_otis_config.json"), current_report_section_target = "sub2_p1_mytestsection_7462b936de74962")
+    section_struct_to_base_contents(config_path=os.path.join(os.path.dirname(__file__), "sir_otis_config.json"), current_report_section_target = "sub2_p1_mytestsection_7462b936de74962")
 
 
 
