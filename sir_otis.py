@@ -33,7 +33,7 @@ Answer in a JSON format as follows:
     ]
 
     
-    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4of"))
     momeutils.crprint(json.dumps(results, indent = 4))
     
     return  results["extraction_results"]
@@ -400,25 +400,95 @@ def node_refinement(config_path = None, **kwargs):
         if user_instruct == 'q':
             done = True
         else:
-            # base_contents = momeutils.parse_json(mome.get_node_section(focus_node_path))
-            valid, new_contents, new_control_contents = process_node_refinement_user_instruct(focus_node_path, user_instruct)
+
+            valid, new_contents, new_control_contents = process_node_refinement_user_instruct(config, focus_node_path, user_instruct)
 
             if valid: 
                 mome.update_section(focus_node_path, "Base contents", momeutils.j_deco(new_contents))
                 mome.update_section(focus_node_path, "Control center", momeutils.j_deco(new_control_contents))
 
-    ADD LATEST UDPATES TO THE CONFIG SO WE CAN HAVE A "DEVELOP" COMMAND TO ENHANCE 
+    # ADD LATEST UDPATES TO THE CONFIG SO WE CAN HAVE A "DEVELOP" COMMAND TO ENHANCE 
 
 
-def node_refinement_command(focus_node_path, user_instruct): 
+def node_refinement_command(config, focus_node_path, user_instruct): 
     """
-    available commands: add (that's it for now)
+    available commands: 
+        * add   
+            * Example usage: !add, section_name, 2 | content to insert
+        * update 
+            * Example usage: !update, section_name | content instruction
+        * delete
+            * Example usage: !delete, section_name
     """
 
     valid = True
     base_contents = momeutils.parse_json(mome.get_node_section(focus_node_path))
     control_contents = momeutils.parse_json(mome.get_node_section(focus_node_path, "Control center"))
     # parse command  
+    cmd_part = user_instruct.split('|')[0]
+    cmd = cmd_part.split('!')[1].split(',')[0].strip()
+
+
+    if cmd.strip() == "add": 
+        valid, new_contents, new_controls = process_add_command(config, focus_node_path, base_contents, control_contents, user_instruct)
+    elif cmd.strip() == "update":
+        valid, new_contents, new_controls = process_update_command(config, focus_node_path, base_contents, control_contents, user_instruct)
+    elif cmd.strip() == "delete":
+        valid, new_contents, new_controls = process_delete_command(config, focus_node_path, base_contents, control_contents, user_instruct)
+    else: 
+        valid = False 
+
+    return valid, new_contents, new_controls
+
+def process_delete_command(config, focus_node_path, base_contents, control_contents, user_instruct):
+    cmd_part = user_instruct.split('|')[0]
+    cmd, section_to_delete = cmd_part.split('!')[1].split(',')
+    # section_to_delete = "proposed_innovation"
+    section_to_delete = section_to_delete.strip()
+
+    if not section_to_delete in base_contents.keys(): 
+        momeutils.crline('Invalid key: {}'.format(section_to_delete))
+        return False, base_contents, control_contents
+
+    # FIND CORRESPONDING NODE AND DELETE DYNASTY 
+    dynasty = mome.collect_dynasty_paths(focus_node_path, include_root = True, preserve_hierarchy = True)
+    target_node = [p['path'] for p in dynasty['children'] if section_to_delete.replace('_', '') in p['path']][0]
+
+    # UPDATE LINKS (CAREFUL, IT ASSUMES THAT WE ARE USING THE 'LINKS' SECTION )
+    links = mome.get_node_links(focus_node_path)
+    cleaned_links = [f"[[{l}]]" for l in links if section_to_delete.replace('_', '') not in l]
+    mome.update_section(focus_node_path, "Links", "\n".join(cleaned_links))
+
+    # DELETE THE NODE AND ITS DYNASTY
+    dynasty_to_delete = mome.collect_dynasty_paths(target_node, include_root = True, preserve_hierarchy = False)
+    for p in dynasty_to_delete:
+        os.remove(p)
+
+    # DELETE THE SECTION
+    new_contents = base_contents.copy()
+    new_controls = control_contents.copy()
+    del new_contents[section_to_delete]
+    del new_controls[section_to_delete]
+    return True, new_contents, new_controls
+
+def process_update_command(config, focus_node_path, base_contents, control_contents, user_instruct):
+    cmd_part = user_instruct.split('|')[0]
+    cmd, section_to_update = cmd_part.split('!')[1].split(',')
+    section_to_update = section_to_update.strip()
+
+    if not section_to_update in base_contents.keys(): 
+        momeutils.crline('Invalid key: {}'.format(section_to_update))
+        return False, base_contents, control_contents
+
+    # UPDATE MUST ULTIMATELY BE HANDLED BY LLM BUT FOR NOW, WE'LL JUST REPLACE THE CONTENTS
+    new_contents = base_contents.copy()
+    new_controls = control_contents.copy()
+    new_contents[section_to_update] = user_instruct.split('|')[1].strip()
+    
+    return True, new_contents, new_controls
+
+def process_add_command(config, focus_node_path, base_contents, control_contents, user_instruct):
+    
     cmd_part = user_instruct.split('|')[0]
     cmd, section_to_insert, insert_at_idx = cmd_part.split('!')[1].split(',')
 
@@ -427,26 +497,61 @@ def node_refinement_command(focus_node_path, user_instruct):
         return False, base_contents, control_contents
     
     insert_at_idx = int(insert_at_idx.strip())
+
+    # UPDATING NODES
+    dynasty = mome.collect_dynasty_paths(focus_node_path, include_root = True, preserve_hierarchy = True)
+    # BE VERY CAREFUL !! THE +1 IS BECAUSE WE USUALLY HAVE: 
+    #   RESULTS_...  (NODE 0) (NOT SEEN BY USER DURING SELECTION)
+    #   SUB0_P0... (NODE 1)
+    #   SUB0_P1... (NODE 2)
+    # --> TO INSERT SOMETHING AT POSITION 1 (AKA: AFTER NODE 0) ACTUALLY MEANS TARGETTING A +1
+    # print(json.dumps(target_dynasty, indent= 4))
+    new_links = update_children(focus_node_path, dynasty, insert_at_idx = insert_at_idx)
+    mome.update_section(focus_node_path, "Links", "\n".join(new_links))
+
+    
     content_to_insert = user_instruct.split('|')[1].strip()
     new_contents= base_contents.copy()
     new_controls= control_contents.copy()
+    new_contents = dict(list(new_contents.items())[:insert_at_idx] + [(section_to_insert, content_to_insert)] + list(new_contents.items())[insert_at_idx:])
+    new_controls = dict(list(new_controls.items())[:insert_at_idx] + [(section_to_insert, get_default_section_dict())] + list(new_controls.items())[insert_at_idx:])
 
-    if cmd.strip() == "add": 
-        new_contents = dict(list(new_contents.items())[:insert_at_idx] + [(section_to_insert, content_to_insert)] + list(new_contents.items())[insert_at_idx:])
-        new_controls = dict(list(new_controls.items())[:insert_at_idx] + [(section_to_insert, get_default_section_dict())] + list(new_controls.items())[insert_at_idx:])
+    current_tag = mome.get_file_tags(focus_node_path)[0] # CAREFUL FOR THE 0, IN CASE THERE ARE MULTIPLE TAGS AT SOME POINT
+    section_level = len(current_tag.split('_')) + 1
+    parent_hash = mome.get_short_hash(focus_node_path, 15)
+
+    add_subnode_from_contents_control(config, focus_node_path, content_to_insert, get_default_section_dict(), section_to_insert, current_tag, section_level, insert_at_idx, parent_hash)
+
+    return True, new_contents, new_controls
+
+def update_children(focus_node_path, full_dynasty, insert_at_idx = None, remove_at_idx = None):
+
+    if insert_at_idx is not None: 
+        target_dynasty = [d for i,d in enumerate(full_dynasty['children']) if i >= insert_at_idx+1] 
+        inc = 1 
+    elif remove_at_idx is not None:
+        target_dynasty = [d for i,d in enumerate(full_dynasty['children']) if i > remove_at_idx]
+        inc = -1
     else: 
-        valid = False 
+        raise ValueError('No action specified for update_children')
+    unchanged_paths= [d['path'] for i,d in enumerate(full_dynasty['children']) if i < insert_at_idx+1]
+    new_links = [f"[[{os.path.basename(p).split('.')[0]}]]" for p in unchanged_paths]
+    target_paths = [c['path'] for c in target_dynasty]
+    # updating the target_paths 
+    for tp in target_paths: 
+        parts = os.path.basename(tp).split('_')
+        parts[1] = f"p{int(parts[1][1:]) + 1}"
+        shutil.move(tp, os.path.join(os.path.dirname(tp), "_".join(parts)))
+        new_links.append("[[{}]]".format("_".join(parts).split('.')[0]))
+    return new_links
 
-    
-    return valid, new_contents, new_controls
-
-# TMP 
-def process_node_refinement_user_instruct(focus_node_path, user_instruct):
+    # TMP 
+def process_node_refinement_user_instruct(config, focus_node_path, user_instruct):
     """
     if starts with !, add key 
     """
     if user_instruct.strip().startswith('!'): 
-        return node_refinement_command(focus_node_path, user_instruct)
+        return node_refinement_command(config, focus_node_path, user_instruct)
     base_contents = momeutils.parse_json(mome.get_node_section(focus_node_path))
     control_contents = momeutils.parse_json(mome.get_node_section(focus_node_path, "Control center"))
 
@@ -492,32 +597,64 @@ def node_expansion_colab(config_path = None, **kwargs):
     section_level = len(current_tag.split('_')) + 1
     for i, k in enumerate(focus_node_contents.keys()): 
 
-        if focus_node_control[k]['template'].strip().lower() == "direct": # means that this is going to be directly used to write 
+        add_subnode_from_contents_control(config, focus_node_path, focus_node_contents[k], focus_node_control[k], k, current_tag, section_level, i, parent_hash)
+
+        # if focus_node_control[k]['template'].strip().lower() == "direct": # means that this is going to be directly used to write 
+        #     tag = ['to_compile']
+        #     t = make_theme_template(content = focus_node_contents[k], 
+        #                             things_said_before = "\n".join([focus_node_contents[kk] for kk in list(focus_node_contents.keys())[:list(focus_node_contents.keys()).index(k)]]),
+        #                             where_this_is_going = "\n".join([kk for kk in list(focus_node_contents.keys())[list(focus_node_contents.keys()).index(k):]]),
+        #                             )
+        #     node_contents = {"Structure": momeutils.j_deco(t), "Results" : ""}
+        # else: 
+        #     section_org = tmp_get_section_org(focus_node_contents[k])
+        #     node_contents = {"Base contents": momeutils.j_deco(section_org), # AI RESULTS 
+        #                      "Control center": momeutils.j_deco(setup_control_params(section_org)), 
+        #                     "Section structure": momeutils.j_deco({"initial_contents": focus_node_contents[k],  # that's the original + some controls (in case we wanna regen)
+        #                                                            "how_many_subs": 2, 
+        #                                                             })}
+            
+        #     tag = ['sub_' + current_tag]
+
+        # new_part = mome.add_node_to_graph(config['interactive_graph_path'],
+        #                                 contents = node_contents,
+        #                                 tags = tag,
+        #                                 parent_path = focus_node_path, 
+        #                                 # node_prefix = k, 
+        #                                 name_override = "sub{}_p{}_{}_{}".format(section_level, i, 
+        #                                                                          re.sub(r'[^a-zA-Z0-9\s]', '', k).strip().lower().replace(' ', '_'),
+        #                                                                          parent_hash ),
+        #                                 use_hash = False)
+
+def add_subnode_from_contents_control(config, focus_node_path, contents, control, subname, current_tag, section_level, paragraph_id, parent_hash): 
+    
+    if control['template'].strip().lower() == "direct": # means that this is going to be directly used to write 
             tag = ['to_compile']
-            t = make_theme_template(content = focus_node_contents[k], 
-                                    things_said_before = "\n".join([focus_node_contents[kk] for kk in list(focus_node_contents.keys())[:list(focus_node_contents.keys()).index(k)]]),
-                                    where_this_is_going = "\n".join([kk for kk in list(focus_node_contents.keys())[list(focus_node_contents.keys()).index(k):]]),
+            t = make_theme_template(content = contents, 
+                                    things_said_before = "\n".join([contents[kk] for kk in list(contents.keys())[:list(contents.keys()).index(subname)]]),
+                                    where_this_is_going = "\n".join([kk for kk in list(contents.keys())[list(contents.keys()).index(subname):]]),
                                     )
             node_contents = {"Structure": momeutils.j_deco(t), "Results" : ""}
-        else: 
-            section_org = tmp_get_section_org(focus_node_contents[k])
-            node_contents = {"Base contents": momeutils.j_deco(section_org), # AI RESULTS 
-                             "Control center": momeutils.j_deco(setup_control_params(section_org)), 
-                            "Section structure": momeutils.j_deco({"initial_contents": focus_node_contents[k],  # that's the original + some controls (in case we wanna regen)
-                                                                   "how_many_subs": 2, 
-                                                                    })}
-            
-            tag = ['sub_' + current_tag]
+    else: 
+        section_org = tmp_get_section_org(contents)
+        node_contents = {"Base contents": momeutils.j_deco(section_org), # AI RESULTS 
+                            "Control center": momeutils.j_deco(setup_control_params(section_org)), 
+                        "Section structure": momeutils.j_deco({"initial_contents": contents,  # that's the original + some controls (in case we wanna regen)
+                                                                "how_many_subs": 2, 
+                                                                })}
+        
+        tag = ['sub_' + current_tag]
 
-        new_part = mome.add_node_to_graph(config['interactive_graph_path'],
-                                        contents = node_contents,
-                                        tags = tag,
-                                        parent_path = focus_node_path, 
-                                        # node_prefix = k, 
-                                        name_override = "sub{}_p{}_{}_{}".format(section_level, i, 
-                                                                                 re.sub(r'[^a-zA-Z0-9\s]', '', k).strip().lower().replace(' ', '_'),
-                                                                                 parent_hash ),
-                                        use_hash = False)
+    new_part = mome.add_node_to_graph(config['interactive_graph_path'],
+                                    contents = node_contents,
+                                    tags = tag,
+                                    parent_path = focus_node_path, 
+                                    # node_prefix = k, 
+                                    name_override = "sub{}_p{}_{}_{}".format(section_level, paragraph_id, 
+                                                                                re.sub(r'[^a-zA-Z0-9\s]', '', subname).strip().lower().replace(' ', '_'),
+                                                                                parent_hash ),
+                                    use_hash = False)
+    return new_part
 
 def get_compilable_children(config_path = None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -547,6 +684,12 @@ def collect_results_node_in_children(current_node):
 
 def sub_compilation(config_path = None, **kwargs):
 
+    """
+    Loads the configuration, identifies compilable children nodes, collects results from direct children
+    Then,performs compilation or result collection for each child node. 
+    The results are then updated in the designated result node.
+    """
+
     config = load_config(config_path, **kwargs)
 
     focus_node_path = os.path.join(config['interactive_graph_path'], config['current_report_section_target'] + ".md")
@@ -567,7 +710,6 @@ def sub_compilation(config_path = None, **kwargs):
             results.append("Node {}: Already compiled --> Contents: {}".format(c, mome.get_node_section([r[1] for r in result_in_direct_children if r[0] == c][0], "Results")))
         else: # other node missing compilation
             results.append("Node {}: TODO".format(i))
-    input("\n".join(results))
     mome.update_section(result_node, "Results", "\n\n".join(results))
 
 
@@ -618,18 +760,20 @@ if __name__ == "__main__":
 
     # focus_sir(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "root")
 
-    # ================== Enhancing nodes 
-    node_refinement(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
-
-
-    # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
+    node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
     # momeutils.uinput('Change one element in the control center to "direct" and run the node_expansion_colab function again | this should be a function')
     # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub2_p2_proposedinnovation_7462b936de74962")
+    # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub2_p0_overview_7462b936de74962")
+    # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub2_p1_issueswithdifferentmethods_7462b936de74962")
 
-    # ================== Let's try to build a subsection
+    # # ================== Let's try to build a subsection
     # get_compilable_children(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'))
     # sub_compilation(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub2_p2_proposedinnovation_7462b936de74962")
     # sub_compilation(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
+
+    # ================== Enhancing nodes 
+    node_refinement(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "operationtopic_b68ab377e8ecfc0")
+
 
 
 
