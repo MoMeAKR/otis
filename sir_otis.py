@@ -599,40 +599,14 @@ def node_expansion_colab(config_path = None, **kwargs):
 
         add_subnode_from_contents_control(config, focus_node_path, focus_node_contents[k], focus_node_control[k], k, current_tag, section_level, i, parent_hash)
 
-        # if focus_node_control[k]['template'].strip().lower() == "direct": # means that this is going to be directly used to write 
-        #     tag = ['to_compile']
-        #     t = make_theme_template(content = focus_node_contents[k], 
-        #                             things_said_before = "\n".join([focus_node_contents[kk] for kk in list(focus_node_contents.keys())[:list(focus_node_contents.keys()).index(k)]]),
-        #                             where_this_is_going = "\n".join([kk for kk in list(focus_node_contents.keys())[list(focus_node_contents.keys()).index(k):]]),
-        #                             )
-        #     node_contents = {"Structure": momeutils.j_deco(t), "Results" : ""}
-        # else: 
-        #     section_org = tmp_get_section_org(focus_node_contents[k])
-        #     node_contents = {"Base contents": momeutils.j_deco(section_org), # AI RESULTS 
-        #                      "Control center": momeutils.j_deco(setup_control_params(section_org)), 
-        #                     "Section structure": momeutils.j_deco({"initial_contents": focus_node_contents[k],  # that's the original + some controls (in case we wanna regen)
-        #                                                            "how_many_subs": 2, 
-        #                                                             })}
-            
-        #     tag = ['sub_' + current_tag]
-
-        # new_part = mome.add_node_to_graph(config['interactive_graph_path'],
-        #                                 contents = node_contents,
-        #                                 tags = tag,
-        #                                 parent_path = focus_node_path, 
-        #                                 # node_prefix = k, 
-        #                                 name_override = "sub{}_p{}_{}_{}".format(section_level, i, 
-        #                                                                          re.sub(r'[^a-zA-Z0-9\s]', '', k).strip().lower().replace(' ', '_'),
-        #                                                                          parent_hash ),
-        #                                 use_hash = False)
-
 def add_subnode_from_contents_control(config, focus_node_path, contents, control, subname, current_tag, section_level, paragraph_id, parent_hash): 
     
     if control['template'].strip().lower() == "direct": # means that this is going to be directly used to write 
             tag = ['to_compile']
+            focus_contents = momeutils.parse_json(mome.get_node_section(focus_node_path)) # Collects the first section
             t = make_theme_template(content = contents, 
-                                    things_said_before = "\n".join([contents[kk] for kk in list(contents.keys())[:list(contents.keys()).index(subname)]]),
-                                    where_this_is_going = "\n".join([kk for kk in list(contents.keys())[list(contents.keys()).index(subname):]]),
+                                    things_said_before = "\n".join([focus_contents[kk] for kk in list(focus_contents.keys())[:list(focus_contents.keys()).index(subname)]]),
+                                    where_this_is_going = "\n".join([kk for kk in list(focus_contents.keys())[list(focus_contents.keys()).index(subname)+1:]]),
                                     )
             node_contents = {"Structure": momeutils.j_deco(t), "Results" : ""}
     else: 
@@ -672,17 +646,29 @@ def section_struct_to_base_contents(config_path = None, **kwargs):
     structure_contents = momeutils.parse_json(mome.get_node_section(focus_node_path, "Section structure"))
     
     # TMP MANUAL FOR NOW !!! 
-    computed_contents = {"_".join(s.strip().split()[:2]).lower(): s for s in structure_contents['initial_contents'].split('.') if len(s.strip()) > 2}
+    computed_contents = {"_".join(s.strip().replace(',', '').split()[:2]).lower(): s for s in structure_contents['initial_contents'].split('.') if len(s.strip()) > 2}
     # ABOVE SHOULD BE A LLM CALL  
 
     # REMOVE NODE DYNASTY (CLEANING)
-    dynasty = mome.collect_dynasty_paths(focus_node_path, include_root = False, preserve_hierarchy = False)
-    input(dynasty)
+    clean_dynasty(focus_node_path, include_root = False)
+    # dynasty = mome.collect_dynasty_paths(focus_node_path, include_root = False, preserve_hierarchy = False)
+    
     
     mome.update_section(focus_node_path, "Base contents", momeutils.j_deco(computed_contents))
     save_config(config, config_path)
     # HANDLES CONTROL CENTER 
     control_center_from_base_contents(config_path)
+
+def clean_dynasty(root, include_root, link_section = "Links"):
+    """
+    Removes children and cleans also the link sections, assuming include_root is false (otherwise, it is deleted) 
+    """
+    dynasty = mome.collect_dynasty_paths(root, include_root = include_root, preserve_hierarchy = False)
+    for node in dynasty: 
+        os.remove(node)
+    if not include_root: 
+        mome.update_link_section(root, "", link_section = link_section)    
+
 
 def get_compilable_children(config_path = None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -805,7 +791,12 @@ if __name__ == "__main__":
     # ================== Controlling nodes: 
 
     # control_center_from_base_contents(config_path=os.path.join(os.path.dirname(__file__), "sir_otis_config.json"), current_report_section_target = "sub2_p1_mytestsection_7462b936de74962")
-    section_struct_to_base_contents(config_path=os.path.join(os.path.dirname(__file__), "sir_otis_config.json"), current_report_section_target = "sub2_p1_mytestsection_7462b936de74962")
+    # section_struct_to_base_contents(config_path=os.path.join(os.path.dirname(__file__), "sir_otis_config.json"), current_report_section_target = "sub2_p1_mytestsection_7462b936de74962")
+    # node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub2_p1_mytestsection_7462b936de74962")
+
+    # another one ! 
+    # section_struct_to_base_contents(config_path=os.path.join(os.path.dirname(__file__), "sir_otis_config.json"), current_report_section_target = "sub3_p1_whichneeds_2b37889fb80b42b")
+    node_expansion_colab(config_path = os.path.join(os.path.dirname(__file__), 'sir_otis_config.json'), current_report_section_target = "sub3_p1_whichneeds_2b37889fb80b42b")
 
 
 
