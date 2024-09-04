@@ -38,6 +38,30 @@ Answer in a JSON format as follows:
     
     return  results["extraction_results"]
 
+def simple_extract(sample_text = None, sections = None, target_section = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    messages = [
+            {"role": "system", "content": """
+You are an expert annotator assisting the user in structuring text. You will be provided with a text and a list of sections (for an global perspective) and the target section we want to focus on. 
+Your task is to identify and sum up the contents from the root text that are maximally relevant to our target section, while being mindful of the broader context. 
+Answer in a JSON format as follows:
+    ```json
+    {{
+        "extraction_results": "summed up content supporting the current target"
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Root text\n{}\n\n Sections\n{}\n\n Target Section\n{}\n\nGiven the root text, a list of sections and a target section, sum up some elements from the sample text that could serve as justifications or supporting information for our section of interest. Try and be accurate and mindful of other sections, that is, not all content must be used and if nothing relates to the current elements, please use null or an empty list.\n\n".format(icl_examples, sample_text, sections, target_section)}
+    ]
+
+    
+    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    momeutils.crprint(json.dumps(results, indent = 4))
+    
+    return  results["extraction_results"]
+
 def paragraph_writer(paragraph_template = None): 
     
     icl_examples = momeutils.load_icl(inspect.currentframe())
@@ -184,7 +208,8 @@ def init_config_file(config_path):
             "what_we_actually_did": ["overview", "technical details", "results", "discussions"], 
             "conclusion": ["summary", "future work", "concluding remarks"]
         }, 
-        "current_report_section_target": None
+        "current_report_section_target": None, 
+        "last_nodes_added": []
     }
 
     with open(config_path, 'w') as f:
@@ -199,11 +224,16 @@ def load_config(config_path, **kwargs):
     nb_updates = 0 
     for k,v in kwargs.items():  
         if k in config.keys():
+            print(k, v)
             nb_updates += 1
             config[k] = v
             if k == "base_contents_path": 
                 config['current_base_hash'] = mome.get_short_hash(open(kwargs['base_contents_path']).read(), 15)
                 nb_updates += 1 
+    if not "current_report_section_target" in kwargs.keys(): 
+        momeutils.crline('Loading focus node from active node')
+        config['current_report_section_target'] = mome.get_active_node(config['interactive_graph_path'])
+        nb_updates += 1
 
     if nb_updates > 0:
         momeutils.crline('Updated config file')
@@ -279,13 +309,16 @@ def compile(config_path = None, **kwargs):
 def high_level_struct(config_path = None, **kwargs): 
     
     config = load_config(config_path, **kwargs)
+
     base_contents = open(config['base_knowledge_path']).read()
+
     report_structure = config['report_structure']
     mome.init_obsidian_vault(config['interactive_graph_path'], exists_ok=False)
     base_hash = mome.get_short_hash(base_contents, 15)
 
     root_node = mome.add_node_to_graph(config['interactive_graph_path'],
                                         contents = {"Base contents": base_contents, 
+                                                    "Progress": momeutils.j_deco({k: [] for k in report_structure.keys()}), 
                                                     "Structure": momeutils.j_deco(report_structure)},
                                         tags = ['root'], 
                                         name_override = base_hash)
@@ -293,12 +326,15 @@ def high_level_struct(config_path = None, **kwargs):
     config['current_base_hash'] = base_hash 
 
     for k in report_structure.keys():
-        out = extract_subsection_justifications(base_contents, "\n* ".join([""] + list(report_structure.keys())), k, report_structure[k])
-        control_params = setup_control_params(out)
+        # out = extract_subsection_justifications(base_contents, "\n* ".join([""] + list(report_structure.keys())), k, report_structure[k])
+        out= simple_extract(base_contents, "\n* ".join([""] + list(report_structure.keys())), k)
+
+        # control_params = setup_control_params(out)
         
         section_node = mome.add_node_to_graph(config['interactive_graph_path'],
-                                                contents = {"Base contents": momeutils.j_deco({o:"\n* ".join([""] + out[o]) for o in out.keys()}),
-                                                            "Control center": momeutils.j_deco(control_params), 
+                                                contents = {"Base contents": "Needs contents compilation", #momeutils.j_deco({o:"\n* ".join([""] + out[o]) for o in out.keys()}),
+                                                            "Control center": "Needs control compilation", #momeutils.j_deco(control_params), 
+                                                            "Section structure": momeutils.j_deco(setup_section_structure(out)),  # that's the original + some controls (in case we wanna regen)
                                                             "Results": ""},
                                                 tags = ['section'],
                                                 parent_path = root_node, 
@@ -306,6 +342,24 @@ def high_level_struct(config_path = None, **kwargs):
                                                 use_hash = False)
     
     save_config(config, config_path)
+
+# def confirm_node(config_path = None, **kwargs): 
+#     config = load_config(config_path, **kwargs)
+#     section_struct_to_base_contents
+
+
+
+def setup_section_structure(initial_contents): 
+    contents_to_insert = ''
+    if isinstance(initial_contents, dict): 
+        contents_to_insert = "  ".join("{}: {}".format(k, v) for k,v in initial_contents.items())
+    elif isinstance(initial_contents, list): 
+        contents_to_insert = " ".join(initial_contents)
+    else: 
+        contents_to_insert = initial_contents
+    return {"initial_contents": contents_to_insert, 
+            "subs_titles" : [],
+            "nb_subs": 2,}
 
 def setup_control_params(suggested_sections): 
     if isinstance(suggested_sections, list): 
@@ -596,8 +650,21 @@ def node_expansion_colab(config_path = None, **kwargs):
     current_tag = mome.get_file_tags(focus_node_path)[0] # CAREFUL FOR THE 0, IN CASE THERE ARE MULTIPLE TAGS AT SOME POINT 
     section_level = len(current_tag.split('_')) + 1
     for i, k in enumerate(focus_node_contents.keys()): 
-
         add_subnode_from_contents_control(config, focus_node_path, focus_node_contents[k], focus_node_control[k], k, current_tag, section_level, i, parent_hash)
+    
+    enhance_root_structure(config)
+
+def enhance_root_structure(config): 
+
+    full_dynasty = mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md"), include_root = True, preserve_hierarchy = True)
+    # FIGURING OUT THE PARENT 
+    current_parent = mome.find_parent_in_dynasty(full_dynasty, config['current_report_section_target'])
+
+    # figure out what has been added 
+
+
+
+
 
 def add_subnode_from_contents_control(config, focus_node_path, contents, control, subname, current_tag, section_level, paragraph_id, parent_hash): 
     
@@ -613,9 +680,8 @@ def add_subnode_from_contents_control(config, focus_node_path, contents, control
         section_org = tmp_get_section_org(contents)
         node_contents = {"Base contents": momeutils.j_deco(section_org), # AI RESULTS 
                             "Control center": momeutils.j_deco(setup_control_params(section_org)), 
-                        "Section structure": momeutils.j_deco({"initial_contents": contents,  # that's the original + some controls (in case we wanna regen)
-                                                                "nb_subs": 2, 
-                                                                })}
+                        "Section structure": momeutils.j_deco(setup_section_structure(section_org)),
+                        }
         
         tag = ['sub_' + current_tag]
 
@@ -641,6 +707,7 @@ def control_center_from_base_contents(config_path = None, **kwargs):
 def section_struct_to_base_contents(config_path = None, **kwargs): 
     config = load_config(config_path, **kwargs)
     focus_node_path = os.path.join(config['interactive_graph_path'], config['current_report_section_target'] + ".md")
+    # focus_node_path = os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md")
     # uses the contents to determine the sections 
     # remove node dynasty if existing 
     structure_contents = momeutils.parse_json(mome.get_node_section(focus_node_path, "Section structure"))
@@ -653,9 +720,10 @@ def section_struct_to_base_contents(config_path = None, **kwargs):
     clean_dynasty(focus_node_path, include_root = False)
     # dynasty = mome.collect_dynasty_paths(focus_node_path, include_root = False, preserve_hierarchy = False)
     
-    
+
     mome.update_section(focus_node_path, "Base contents", momeutils.j_deco(computed_contents))
-    save_config(config, config_path)
+    # save_config(config, config_path)
+
     # HANDLES CONTROL CENTER 
     control_center_from_base_contents(config_path)
 

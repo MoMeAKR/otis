@@ -67,13 +67,40 @@ if [ "$1" = "build_sub" ]; then
     eval $command
 fi
 
+if [ "$1" = "confirm_node" ]; then 
+    command="python -c 'import sir_otis; sir_otis.section_struct_to_base_contents(\"$local_file_path\")'"
+    eval $command
+fi
+ 
+if [ "$1" = "expand" ]; then 
+
+command="python -c 'import sir_otis; sir_otis.node_expansion_colab(\"$local_file_path\")'"
+eval $command
+fi 
+
+
+
+
 if [ "$1" = "compile" ]; then 
     command="python -c 'import sir_otis; sir_otis.compile(\"$local_file_path\")'"
     eval $command
 fi 
 
 if [ "$1" = "hls" ]; then 
-    command="python -c 'import sir_otis; sir_otis.high_level_struct(\"$local_file_path\")'"
+    base_knowledge_path=None
+    while [ $# -gt 1 ]; do 
+        case $1 in 
+            --k) 
+                base_knowledge_path="$2"
+                shift 2
+                ;;
+            *) 
+                shift 1
+                ;;
+        esac 
+    done
+    command="python -c 'import sir_otis; sir_otis.high_level_struct(\"$local_file_path\", base_knowledge_path=\"$base_knowledge_path\")'"
+    # command="python -c 'import sir_otis; sir_otis.high_level_struct(\"$local_file_path\")'"
     eval $command
 fi 
 
