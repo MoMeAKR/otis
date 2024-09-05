@@ -649,21 +649,206 @@ def node_expansion_colab(config_path = None, **kwargs):
     
     current_tag = mome.get_file_tags(focus_node_path)[0] # CAREFUL FOR THE 0, IN CASE THERE ARE MULTIPLE TAGS AT SOME POINT 
     section_level = len(current_tag.split('_')) + 1
+    added_nodes = []
     for i, k in enumerate(focus_node_contents.keys()): 
-        add_subnode_from_contents_control(config, focus_node_path, focus_node_contents[k], focus_node_control[k], k, current_tag, section_level, i, parent_hash)
+        n = add_subnode_from_contents_control(config, focus_node_path, focus_node_contents[k], focus_node_control[k], k, current_tag, section_level, i, parent_hash)
+        added_nodes.append(n)
+    
+    config['last_nodes_added'] = added_nodes
     
     enhance_root_structure(config)
+    save_config(config, config_path)
 
-def enhance_root_structure(config): 
+# def enhance_root_structure(config): 
 
-    full_dynasty = mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md"), include_root = True, preserve_hierarchy = True)
-    # FIGURING OUT THE PARENT 
+#     full_dynasty = mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md"), include_root = True, preserve_hierarchy = True)
+#     # FIGURING OUT THE PARENT 
+#     current_parent = mome.find_parent_in_dynasty(full_dynasty, config['current_report_section_target'])
+
+#     # figure out what has been added 
+#     added_nodes = config['last_nodes_added']
+
+#     # enhancing the 'progress' section in root
+#     nodes_names = [os.path.basename(n).split('.')[0].split('_')[2] for n in added_nodes]
+    
+    
+#     # THAT IS NOT ROBUST, IT IS BASED ON THE NAME CONVENTION AND SHOULD ULTIMATELY BE UPDATED (OR WE CAN USE THE HASH OR IMPROVE NAMING CONVENTION)
+
+#     current_parent_name = os.path.basename(current_parent).split('.')[0]
+#     focus_node = config['current_report_section_target']
+
+#     stage = focus_node.count('_')
+#     # stage = current_parent_name.count('_')
+#     root_node = os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md")
+#     progress_section_contents = momeutils.parse_json(mome.get_node_section(root_node, "Progress"))
+#     if stage == 0: # aka, big chapters just below root
+#         # nameofthecrrentnode_hash is the format
+#         print('stage 0 ')
+#         for k in progress_section_contents.keys(): 
+#             if k.replace('_', '') == config['current_report_section_target'].split('_')[0]:
+#                 progress_section_contents[k] = nodes_names
+#         mome.update_section(root_node, "Progress", momeutils.j_deco(progress_section_contents))
+#     else: 
+#         if stage == 1: 
+
+#             depth = 1
+#             focus_name = config['current_report_section_target'].split('_')[0]
+#             keys_at_correct_depth = list(momeutils.parse_json(mome.get_node_section(os.path.join(config['interactive_graph_path'], config['current_report_section_target'] + ".md"), "Base contents")).keys())
+
+#         else: 
+#             depth = int(focus_node.split('_')[0].replace('sub', '').strip())
+#             focus_name = config['current_report_section_target'].split('_')[2]
+#             # input('here')
+
+#         # Recursive function to collect keys at each depth level
+#         def collect_keys_at_depth(d, current_depth, target_depth, path):
+#             print(current_depth, target_depth)
+#             if current_depth == target_depth: 
+#                 keys_at_correct_depth.append(path)
+#                 return
+#             # print(d, current_depth, target_depth, path)
+
+#             for k, v in d.items():
+
+#                 if isinstance(v, dict):
+#                     print('there', v)
+#                     collect_keys_at_depth(v, current_depth + 1, target_depth, path + [k])
+#                 elif isinstance(v, list):
+#                     print('Is list: {}-{}'.format(k, v))
+#                     for item in v:
+#                         print(item, (type(item)), 'here')
+#                         if isinstance(item, dict):
+#                             collect_keys_at_depth(item, current_depth + 1, target_depth, path + [item])
+#                         elif isinstance(item, str):
+#                             collect_keys_at_depth({}, current_depth + 1, target_depth, path + [k, item])
+#                         elif isinstance(item, list):
+#                             print(path, k, item)
+#                             collect_keys_at_depth({}, current_depth + 1, target_depth, path + item)
+#                         else: 
+#                             raise ValueError('Unrecognized type {} in collect_keys_at_depth'.format(type(item)))
+#                 elif isinstance(v, str):
+#                     collect_keys_at_depth({}, current_depth + 1, target_depth, path + [v])
+
+#         keys_at_correct_depth = []
+#         # input(progress_section_contents)
+#         collect_keys_at_depth(progress_section_contents, 1, depth, [])
+#         # Find the correct key path
+#         input(keys_at_correct_depth)
+#         correct_key_path = None
+#         for path in keys_at_correct_depth:
+#             print(path, path[-1], focus_name)
+#             if path[-1].replace('_', '') == focus_name:
+#                 correct_key_path = path
+#                 break
+#         # input('Correct path: {}'.format(correct_key_path))
+#         # Update the progress section contents
+#         if correct_key_path:
+#             d = progress_section_contents
+#             for key in correct_key_path[:-1]:
+#                 d = d[key]
+#             # input(d)
+#             idx = d.index(correct_key_path[-1])
+#             d[idx] = {correct_key_path[-1]: nodes_names}
+
+#         mome.update_section(root_node, "Progress", momeutils.j_deco(progress_section_contents))
+
+def enhance_root_structure(config):
+    def collect_keys_at_depth(d, current_depth, target_depth, path):
+        if current_depth == target_depth:
+            print('here')
+            keys_at_correct_depth.append(path)
+            return
+
+        print('inside')
+        for k, v in d.items():
+            print(k,v)
+            if isinstance(v, dict):
+                print('from 0')
+                collect_keys_at_depth(v, current_depth + 1, target_depth, path + [k])
+            elif isinstance(v, list):
+                print('is list, {}-{}'.format(k, v))
+                for item in v:
+                    if isinstance(item, dict):
+                        print('From 1')
+                        collect_keys_at_depth(item, current_depth + 1, target_depth, path + [k, item])
+                    elif isinstance(item, str):
+                        print('From 2')
+                        collect_keys_at_depth({}, current_depth + 1, target_depth, path + [k, item])
+                    elif isinstance(item, list):
+                        print('From 3')
+                        collect_keys_at_depth({}, current_depth + 1, target_depth, path + item)
+                    else:
+                        raise ValueError(f'Unrecognized type {type(item)} in collect_keys_at_depth')
+            elif isinstance(v, str):
+                print('From 4')
+                collect_keys_at_depth({}, current_depth + 1, target_depth, path + [v])
+            else: 
+                input(type(v))
+
+    # Collect the full dynasty paths
+    full_dynasty = mome.collect_dynasty_paths(
+        os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md"),
+        include_root=True,
+        preserve_hierarchy=True
+    )
+
+    # Determine the current parent
     current_parent = mome.find_parent_in_dynasty(full_dynasty, config['current_report_section_target'])
 
-    # figure out what has been added 
+    # Extract added nodes
+    added_nodes = config['last_nodes_added']
+    nodes_names = [os.path.basename(n).split('.')[0].split('_')[2] for n in added_nodes]
+
+    # Determine the stage and root node
+    focus_node = config['current_report_section_target']
+    focus_name = os.path.basename(focus_node).split('.')[0]
+    stage = focus_node.count('_')
+    root_node = os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md")
+
+    # Parse the progress section contents
+    progress_section_contents = momeutils.parse_json(mome.get_node_section(root_node, "Progress"))
+
+    if stage == 0:
+        # Update progress section for stage 0
+        for k in progress_section_contents.keys():
+            if k.replace('_', '') == focus_name:
+                progress_section_contents[k] = nodes_names
+    elif stage == 1: 
+        focus_name = focus_name.split('_')[0]
+        for k in progress_section_contents.keys():
+
+            if k.replace('_', '') == focus_name:
+                progress_section_contents[k] = nodes_names
+    else:
+     
+     
+        depth = int(focus_node.split('_')[0].replace('sub', '').strip())
+        focus_name = config['current_report_section_target'].split('_')[2]
+
+        # Collect keys at the correct depth
+        keys_at_correct_depth = []
+        print('before')
+        collect_keys_at_depth(progress_section_contents, 1, depth, [])
+        input(keys_at_correct_depth)
+        # Find the correct key path
+        correct_key_path = None
+        for path in keys_at_correct_depth:
+            if path[-1].replace('_', '') == focus_name:
+                correct_key_path = path
+                break
+
+        # Update the progress section contents
+        if correct_key_path:
+            d = progress_section_contents
+            for key in correct_key_path[:-1]:
+                d = d[key]
+            idx = d.index(correct_key_path[-1])
+            d[idx] = {correct_key_path[-1]: nodes_names}
 
 
-
+    momeutils.dj(progress_section_contents)
+    # Update the root node with the new progress section contents
+    mome.update_section(root_node, "Progress", momeutils.j_deco(progress_section_contents))
 
 
 def add_subnode_from_contents_control(config, focus_node_path, contents, control, subname, current_tag, section_level, paragraph_id, parent_hash): 
