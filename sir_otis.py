@@ -208,6 +208,10 @@ def init_config_file(config_path):
             "what_we_actually_did": ["overview", "technical details", "results", "discussions"], 
             "conclusion": ["summary", "future work", "concluding remarks"]
         }, 
+        "report_structure_2": {
+            "operation_topic" : ['overview', {'issues_with_different_methods': ["method_A", "method_B"]}],
+            "technical_justification": ["related works and their limitation", "why we should go in the direction we chose"], 
+        },
         "current_report_section_target": None, 
         "last_nodes_added": []
     }
@@ -343,9 +347,90 @@ def high_level_struct(config_path = None, **kwargs):
     
     save_config(config, config_path)
 
-# def confirm_node(config_path = None, **kwargs): 
-#     config = load_config(config_path, **kwargs)
-#     section_struct_to_base_contents
+def structure_to_graph(config_path = None, **kwargs): 
+
+    config = load_config(config_path, **kwargs)
+    mome.init_obsidian_vault(config['interactive_graph_path'], exists_ok=False)
+    make_graph(config_path)
+
+
+def make_graph(config_path): 
+
+    """
+    Example structure: 
+    {
+        "operation_topic" : ['overview', {'issues_with_different_methods': ["method_A", "method_B"]}],
+        "technical_justification": ["related works and their limitation", "why we should go in the direction we chose"], 
+    }
+    """
+    config = load_config(config_path)
+    
+    base_hash = mome.get_short_hash("hello", 15) # TMP
+    # Make root 
+    root_node = mome.add_node_to_graph(config['interactive_graph_path'],
+                                        contents = {"Base contents": "Fill base contents", 
+                                                    "Progress": momeutils.j_deco({k: [] for k in config['report_structure_2'].keys()}), 
+                                                    "Structure": momeutils.j_deco(config['report_structure_2'])},
+                                        tags = ['root'], 
+                                        name_override = base_hash)
+    
+
+    # needs section_struct_to_base_contents and node_expansion_colab(config_path = None, **kwargs): 
+
+    recursive_graph_maker(config_path, root_node, config['report_structure_2'])
+
+def recursive_graph_maker(config_path, parent, current_structure):
+    
+    config = load_config(config_path)
+    graph_folder = config['interactive_graph_path']
+    for k in current_structure.keys(): 
+        # print(k)
+        struct_below = current_structure[k]
+        node_contents = []
+        for i, s in enumerate(struct_below): 
+            if isinstance(s, str): 
+                node_contents.append({"template" : 'direct',
+                                      "title" : s, 
+                                     "content": f"{s} is a paragraph"})
+            elif isinstance(s, dict): 
+
+                sample_sub_keys = [f'{k} requires some reflexion']
+                node_contents.append({"template": 'default',
+                                      "title" : s, 
+                                      "content": ", ".join(sample_sub_keys)})
+
+        section_node = mome.add_node_to_graph(graph_folder,
+                                                contents = {"Base contents": "Needs contents compilation", #momeutils.j_deco({o:"\n* ".join([""] + out[o]) for o in out.keys()}),
+                                                            "Control center": "Needs control compilation", #momeutils.j_deco(control_params), 
+                                                            "Section structure": momeutils.j_deco(setup_section_structure(". ".join([n['content'] for n in node_contents]).capitalize())),  # that's the original + some controls (in case we wanna regen)
+                                                            "Results": ""},
+                                                tags = ['section'],
+                                                parent_path = parent, 
+                                                node_prefix = re.sub(r'[^a-zA-Z0-9\s]', '', k).strip().lower().replace(' ', '_'), 
+                                                use_hash = False)
+        print('Created section node {}'.format(section_node))
+        
+        # confirming to propagate to base and control
+        do_section_struct_to_base_contents(section_node)
+
+        # here update control based on previously collected data 
+        section_controls = momeutils.parse_json(mome.get_node_section(section_node, "Control center"))
+        for i, (k, nc) in enumerate(zip(section_controls.keys(), node_contents)): 
+            section_controls[k]['template'] = nc['template']
+        mome.update_section(section_node, "Control center", momeutils.j_deco(section_controls))
+
+        # then, expand using node_expansion_colab
+        new_tmp_config = node_expansion_colab(config_path, current_report_section_target = os.path.basename(section_node).split('.')[0])
+        for i in range(len(node_contents)): 
+            node_contents[i]['link'] = new_tmp_config['last_nodes_added'][i]
+            if node_contents[i]['template'] != "direct": 
+                # input(struct_below)
+                recursive_graph_maker(config_path, node_contents[i]['link'], struct_below[i])
+
+        # finally, do it recursively  
+        # # recursive_graph_maker(config_path, section_node, struct_below)
+
+    
 
 
 
@@ -656,8 +741,9 @@ def node_expansion_colab(config_path = None, **kwargs):
     
     config['last_nodes_added'] = added_nodes
     
-    enhance_root_structure(config)
+    # enhance_root_structure(config)
     save_config(config, config_path)
+    return config
 
 def enhance_root_structure(config):
     def collect_keys_at_depth(d, current_depth, target_depth, path):
@@ -768,176 +854,6 @@ def enhance_root_structure(config):
     # Update the root node with the new progress section contents
     mome.update_section(root_node, "Progress", momeutils.j_deco(progress_section_contents))
 
-# def enhance_root_structure(config):
-#     def collect_keys_at_depth(d, current_depth, target_depth, path):
-#         if current_depth == target_depth:
-#             # print('here')
-#             keys_at_correct_depth.append(path)
-#             return
-
-#         # print('inside')
-#         for k, v in d.items():
-#             # print(k,v)
-#             if isinstance(v, dict):
-#                 # print('from 0')
-#                 collect_keys_at_depth(v, current_depth + 1, target_depth, path + [k])
-#             elif isinstance(v, list):
-#                 # print('is list, {}-{}'.format(k, v))
-#                 for item in v:
-#                     if isinstance(item, dict):
-#                         # print('From 1')
-#                         collect_keys_at_depth(item, current_depth + 1, target_depth, path + [k, item])
-#                     elif isinstance(item, str):
-#                         # print('From 2')
-#                         collect_keys_at_depth({}, current_depth + 1, target_depth, path + [k, item])
-#                     elif isinstance(item, list):
-#                         # print('From 3')
-#                         collect_keys_at_depth({}, current_depth + 1, target_depth, path + item)
-#                     else:
-#                         raise ValueError(f'Unrecognized type {type(item)} in collect_keys_at_depth')
-#             elif isinstance(v, str):
-#                 # print('From 4')
-#                 collect_keys_at_depth({}, current_depth + 1, target_depth, path + [v])
-#             else: 
-#                 input(type(v))
-
-#     # Collect the full dynasty paths
-#     full_dynasty = mome.collect_dynasty_paths(
-#         os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md"),
-#         include_root=True,
-#         preserve_hierarchy=True
-#     )
-
-#     # Determine the current parent
-#     current_parent = mome.find_parent_in_dynasty(full_dynasty, config['current_report_section_target'])
-
-#     # Extract added nodes
-#     added_nodes = config['last_nodes_added']
-#     nodes_names = [os.path.basename(n).split('.')[0].split('_')[2] for n in added_nodes]
-
-#     # Determine the stage and root node
-#     focus_node = config['current_report_section_target']
-#     focus_name = os.path.basename(focus_node).split('.')[0]
-#     stage = focus_node.count('_')
-#     root_node = os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md")
-
-#     # Parse the progress section contents
-#     progress_section_contents = momeutils.parse_json(mome.get_node_section(root_node, "Progress"))
-
-#     if stage == 0:
-#         # Update progress section for stage 0
-#         for k in progress_section_contents.keys():
-#             if k.replace('_', '') == focus_name:
-#                 progress_section_contents[k] = nodes_names
-#     elif stage == 1: 
-#         focus_name = focus_name.split('_')[0]
-#         for k in progress_section_contents.keys():
-
-#             if k.replace('_', '') == focus_name:
-#                 progress_section_contents[k] = nodes_names
-#     else:
-     
-     
-#         depth = int(focus_node.split('_')[0].replace('sub', '').strip())
-#         focus_name = config['current_report_section_target'].split('_')[2]
-
-#         # Collect keys at the correct depth
-#         keys_at_correct_depth = []
-#         print('before')
-#         collect_keys_at_depth(progress_section_contents, 1, depth, [])
-#         # flattening the collected keys (some of them involve dicts)
-#         momeutils.dj(keys_at_correct_depth)
-
-#         # Find the correct key path
-#         correct_key_path = None
-#         for path in keys_at_correct_depth:
-#             if isinstance(path[-1], str): 
-#                 if path[-1].replace('_', '') == focus_name:
-#                     correct_key_path = path
-#                     break
-#         input(correct_key_path)
-#         # Update the progress section contents
-#         if correct_key_path:
-#             d = progress_section_contents
-#             for key in correct_key_path[:-1]:
-#                 d = d[key]
-#             idx = d.index(correct_key_path[-1])
-#             d[idx] = {correct_key_path[-1]: nodes_names}
-
-
-#     momeutils.dj(progress_section_contents)
-#     # Update the root node with the new progress section contents
-#     mome.update_section(root_node, "Progress", momeutils.j_deco(progress_section_contents))
-# """ EXAMPLE RESULT
-
-# [
-#     [
-#         "operation_topic",
-#         {
-#             "theainimals": [
-#                 "environmentalprotectionthe",
-#                 "andanother"
-#             ]
-#         },
-#         "theainimals",
-#         "environmentalprotectionthe"
-#     ],
-#     [
-#         "operation_topic",
-#         {
-#             "theainimals": [
-#                 "environmentalprotectionthe",
-#                 "andanother"
-#             ]
-#         },
-#         "theainimals",
-#         "andanother"
-#     ],
-#     [
-#         "operation_topic",
-#         {
-#             "inthe": [
-#                 "knowledgestructurationin",
-#                 "andyet"
-#             ]
-#         },
-#         "inthe",
-#         "knowledgestructurationin"
-#     ],
-#     [
-#         "operation_topic",
-#         {
-#             "inthe": [
-#                 "knowledgestructurationin",
-#                 "andyet"
-#             ]
-#         },
-#         "inthe",
-#         "andyet"
-#     ]
-# ]
-
-
-# """
-
-# When using the recursive part in the above function, the dict are not flattented, which ends up creating complex keys_at_correct_depth structures
-# Ideally, we want to flatten it so we have paths that are lists of strings. That is, a correct version of the above example would instead be: 
-# [
-#     [
-#         "operation_topic",
-#         {
-#             "theainimals": [
-#                 "environmentalprotectionthe",
-#                 "andanother"
-#             ]
-#         },
-#         "theainimals",
-#         "environmentalprotectionthe"
-#     ],
-# ] --> ["operation_topic", "theainimals", "environmentalprotectionthe"], [operation_topic, theainimals, andanother]
-
-
-
 def add_subnode_from_contents_control(config, focus_node_path, contents, control, subname, current_tag, section_level, paragraph_id, parent_hash): 
     
     if control['template'].strip().lower() == "direct": # means that this is going to be directly used to write 
@@ -972,6 +888,10 @@ def control_center_from_base_contents(config_path = None, **kwargs):
 
     config = load_config(config_path, **kwargs)
     focus_node_path = os.path.join(config['interactive_graph_path'], config['current_report_section_target'] + ".md")
+    do_control_center_from_base_contents(focus_node_path)
+
+
+def do_control_center_from_base_contents(focus_node_path):
     base_contents = momeutils.parse_json(mome.get_node_section(focus_node_path))    
     control_center = {k: get_default_section_dict() for k in base_contents.keys()}
     mome.update_section(focus_node_path, "Control center", momeutils.j_deco(control_center))
@@ -982,6 +902,9 @@ def section_struct_to_base_contents(config_path = None, **kwargs):
     # focus_node_path = os.path.join(config['interactive_graph_path'], config['current_base_hash'] + ".md")
     # uses the contents to determine the sections 
     # remove node dynasty if existing 
+    do_section_struct_to_base_contents(focus_node_path)
+
+def do_section_struct_to_base_contents(focus_node_path): 
     structure_contents = momeutils.parse_json(mome.get_node_section(focus_node_path, "Section structure"))
     
     # TMP MANUAL FOR NOW !!! 
@@ -997,7 +920,8 @@ def section_struct_to_base_contents(config_path = None, **kwargs):
     # save_config(config, config_path)
 
     # HANDLES CONTROL CENTER 
-    control_center_from_base_contents(config_path)
+    do_control_center_from_base_contents(focus_node_path)
+    # control_center_from_base_contents(config_path)
 
 def clean_dynasty(root, include_root, link_section = "Links"):
     """
@@ -1097,16 +1021,6 @@ def tmp_load(config_path = None, **kwargs):
     if os.path.exists(graph_path): 
         shutil.rmtree(graph_path)
     shutil.copytree(save_path, graph_path)
-
-
-# def node_colab(config_path = None, **kwargs): 
-    
-#     config = load_config(config_path, **kwargs)
-
-#     focus_node_path = os.path.join(config['interactive_graph_path'], config['current_report_section_target'] + ".md")
-#     focus_node_contents = momeutils.parse_json(mome.get_node_section(focus_node_path)) # Collects the first section 
-
-
 
 
     

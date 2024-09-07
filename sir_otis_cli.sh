@@ -86,6 +86,12 @@ if [ "$1" = "compile" ]; then
     eval $command
 fi 
 
+if [ "$1" = "s2" ]; then 
+    command="python -c 'import sir_otis; sir_otis.structure_to_graph(\"$local_file_path\")'"
+    eval $command
+fi 
+ 
+
 if [ "$1" = "hls" ]; then 
     base_knowledge_path=None
     while [ $# -gt 1 ]; do 
