@@ -1,11 +1,89 @@
-import mome 
-import momeutils 
-import os 
-import inspect 
-import json 
-import shutil 
-import glob 
-import re 
+
+import os
+import json
+import momeutils
+import re
+import glob
+import shutil
+import inspect
+import mome
+import subprocess
+
+
+
+def generate_paragraph_subcontents(structured_text = None, nb_paragraphs = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+You are an AI assistant expert in text analysis assisting the user in preparing accurate and efficient guidelines for textual content generation. Concretely, based on provided high-level control structure, you are expected generate {n} paragraph guidelines in a list of targeted subcontents (each element in the list will be used to produce a separate paragraph).
+
+The provided controls can include: 
+* Hierarchy location: tells you where the current paragraph fits in the broader context
+* High-level context: What the current section is 
+* Content: The main content of the paragraph(s) --> the message we want to convey
+* Things said before: What was mentioned before in the section (if anything). This way, you can build upon more complex and sophisticated ideas and reuse the introduced concepts
+* Where this is going: The following parts of the current section (if any). If provided, use those  as a reference to create a coherent and logical flow of ideas and ensure smooth transitions between paragraphs
+* Number of paragraphs: The number of paragraphs you should generate for the provided contents
+* Examples: Examples that the user expects for further illustrating the content (optional)
+* Specific viewpoint: A specific viewpoint that the user wants to be considered (optional)
+* References: References that the user wants to be included (optional)
+* Visuals: Visuals that the user wants to be included (optional)
+
+             
+Answer in a JSON format as follows:
+    ```json
+    {{
+    
+        "list_of_contents" : [
+{p_desc}
+        ]
+    
+    }} 
+    ```
+    """.format(n = nb_paragraphs, 
+               p_desc = ",\n".join(["High-level guidelines (a sentence or two) for paragraph {}".format(i) for i in range(nb_paragraphs)]))}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Text generation controls \n{}\n\nGiven the provided controls, produce {} grounded paragraphes guidelines under the key 'list_of_contents' that will be used for downstream generation.\n\n".format(icl_examples, structured_text, nb_paragraphs)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+       
+    
+    return results["list_of_contents"]
+
+def determine_text_relevance_to_section(text = None, hierarchy = None, target_section = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are an AI assistant with expertise in Natural Language Processing, assisting the user in organizing textual information within a hierarchical structure. Concretely, you are expected to assess the relevance of a given text snippet to a specific section, considering the provided document hierarchy. 
+    Answer in a JSON format as follows:
+    ```json
+    {{
+        "target_section_parent" : "The parent section of the target section",
+        "short_rationale" :"A brief explanation of why the considered text makes sense (or not) regarding the hierarchy", 
+        "score" : "A score ranging from 0 to 10 indicating the relevance of the provided text to the target section"
+    
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Text\n{}\n\n Hierarchy\n{}\n\n Target Section\n{}\n\nGiven a text snippet, a document hierarchy, and a target section, determine the relevance of the text to the target section and return a score between 0 and 10, with 10 indicating perfect relevance.\n\n".format(icl_examples, text, hierarchy, target_section)}
+    ]
+
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    
+    return results["score"]
 
 def paragraph_writer(paragraph_template = None): 
     
@@ -30,6 +108,67 @@ def paragraph_writer(paragraph_template = None):
     momeutils.crprint(json.dumps(results, indent = 4))
     
     return results["result"]
+
+def paragraph_writer_enhanced(paragraph_template = None): 
+
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    messages = [
+            {"role": "system", "content": """
+You are a writing assistant with expertise in producing well-structured and coherent paragraphs. You are expected to generate contents based on a provided template. 
+Specifically, here are some controls that will inform your produced text: 
+* Hierarchy location: tells you where the current paragraph fits in the broader context
+* High-level context: What the current section is 
+* Content: The main content of the paragraph(s) --> the message we want to convey
+* Things said before: What was mentioned before in the section (if anything). This way, you can build upon more complex and sophisticated ideas and reuse the introduced concepts
+* Where this is going: The following parts of the current section (if any). If provided, use those  as a reference to create a coherent and logical flow of ideas and ensure smooth transitions between paragraphs
+* Number of paragraphs: The number of paragraphs you should generate for the provided contents
+* Examples: Examples that the user expects for further illustrating the content (optional)
+* Specific viewpoint: A specific viewpoint that the user wants to be considered (optional)
+* References: References that the user wants to be included (optional)
+* Visuals: Visuals that the user wants to be included (optional)
+                 
+Answer in a JSON format as follows:
+    ```json
+    {{
+        "paragraphs_overlay": [what the first sub-paragraph is about, what the second sub-paragraph is about, ...], // if nb_paragraphs > 1
+        "result" : "The generated paragraph based on the provided template and critical elements."
+    }}
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Paragraph Template\n{}\n\nUse the provided paragraph template to produce a well-structured and coherent paragraph under the key 'result'.\n\n".format(icl_examples, paragraph_template)}
+    ]
+    
+    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    momeutils.crprint(json.dumps(results, indent = 4))
+    
+    return results["result"]
+
+
+def simple_extract(sample_text = None, sections = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    messages = [
+            {"role": "system", "content": """
+You are an expert annotator assisting the user in structuring text. You will be provided with a text and a list of sections (for an global perspective).  
+Your task is to provide some answer to each target section, while being mindful of the broader context. If nothing matches, answer with 'null'
+Answer in a JSON format as follows:
+    ```json
+    {{
+{sections}
+    }} 
+    ```
+    """.format(sections = "\n".join(['"{sectionf}": contents that support the **{section}** subsection",'.format(sectionf = section.lower().strip().replace(' ', "_"), section = section) for section in sections]))}, 
+     
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Root text (serving as a knowledge repository)\n{}\n\n Sections\n{}\n\nGiven the root text and a list of sections, sum up some elements from the root text that could serve as justifications or supporting information for our section of interest. Try and be accurate and mindful of other sections, that is, not all content must be used and if nothing relates to the current elements, please use null.\n\n".format(icl_examples, sample_text, sections)}
+    ]
+
+    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    momeutils.crprint(json.dumps(results, indent = 4))
+    
+    return  results
+
 
 def init_config_file(config_path): 
     config = {
@@ -77,6 +216,38 @@ def save_config(config, p ):
     with open(p, 'w') as f:
         json.dump(config, f, indent = 4)
 
+def format_dynasty(dynasty):
+    # recursive function that scrolls through the dynasty (path, children) and each path is rewritten as os.path.basename(path)
+    # and the children are recursively formatted
+    formatted = {"path": os.path.basename(dynasty['path']).split('.')[0], "children": []}
+    if len(dynasty['children']) > 0:
+        for child in dynasty['children']:
+            formatted['children'].append(format_dynasty(child))
+
+    return formatted
+
+def formatted_path_to_children(dynasty, children): 
+    result= path_to_children(dynasty, children)
+    root_name = result[0]
+    # result[0] = 'Root'
+    cleaned_result = ['Root']
+    for i, r in enumerate(result[1:]):
+        cleaned_result.append(r.split('_')[-2])
+    return cleaned_result
+
+
+def path_to_children(dynasty, target_children):
+
+    # provided the full dynasty from the root, it returns the sequence of parents leading to the target_children
+    if dynasty['path'] == target_children:
+        return [dynasty['path']]
+    else:
+        for child in dynasty['children']:
+            result = path_to_children(child, target_children)
+            if result:
+                return [dynasty['path']] + result
+
+
 
 def format_section_title(s):
     return "".join([w.capitalize() for w in s.replace('_', ' ').lower().strip().split()])
@@ -100,7 +271,7 @@ def gf(v):
         raise TypeError('Unrecognized type for gf --> v type: {}'.format(type(v)))
 
 
-def create_nodes_recursively(graph_folder, structure, parent_path=None, level=0, part=0, parent_hash=None):
+def create_nodes_recursively(root_hash, graph_folder, structure, parent_path=None, level=0, part=0, parent_hash=None):
     for key, value in structure.items():
         if isinstance(value, list):
             # Create the current node
@@ -137,19 +308,26 @@ def create_nodes_recursively(graph_folder, structure, parent_path=None, level=0,
             for i, item in enumerate(value):
                 
                 if isinstance(item, dict):
-                    create_nodes_recursively(graph_folder, item, created_node_path, level + 1, i, current_hash)
+                    create_nodes_recursively(root_hash, graph_folder, item, created_node_path, level + 1, i, current_hash)
                 else:
                     # Create leaf node
 
                     leaf_name = f"lvl{level + 1}_part{i}_{format_section_title(item)}_{current_hash}"
-
+                    # full_dynasty_formatted = format_dynasty(mome.collect_dynasty_paths(os.path.join(graph_folder, root_hash + ".md"), include_root=True, preserve_hierarchy=True))
+                    # print(full_dynasty_formatted)
+                    # print(leaf_name)
+                    # input(' ok ')
+                    # hierarchy_location = path_to_children(full_dynasty_formatted, leaf_name)
                     high_level_context = key # global view 
-                    print(leaf_name, key)
+                    # print(leaf_name, key)
                     things_said_before = section_population if len(section_population) >0 else None,
                     where_this_is_going = section_depopulation if len(section_depopulation) > 0 else None
 
                     leaf_contents = {
-                        "Control center": momeutils.j_deco(make_theme_template(high_level_context = high_level_context,
+                        
+                        "Control center": momeutils.j_deco(initiate_control_center(
+                                                                                hierarchy_location = 'to_fill',
+                                                                                high_level_context = high_level_context,
                                                                                content = f"We gotta talk about {item}", 
                                                                                things_said_before = things_said_before, 
                                                                                where_this_is_going = where_this_is_going,)),
@@ -176,18 +354,41 @@ def make_graph(config_path=None, **kwargs):
     mome.init_obsidian_vault(config['interactive_graph_path'], exists_ok=False)
 
     # Example structure
+    # structure = {
+    #     "operation_topic": ['overview', {'issues_with_different_methods': [{"method_A": ["test0", "test1"]}, "method_B"]}],
+    #     "technical_justification": ["related works and their limitation", "why we should go in the direction we chose"],
+    #     "what_we_actually_did": ["overview", "technical details", {"results": ['experiment 0', {'experiment 1': ['background', 'setup', 'observations']}]}, "discussions"], 
+    #     "conclusion": ["summary", "future work", "concluding remarks"]
+    # }
+
     structure = {
-        "operation_topic": ['overview', {'issues_with_different_methods': [{"method_A": ["test0", "test1"]}, "method_B"]}],
-        "technical_justification": ["related works and their limitation", "why we should go in the direction we chose"],
-        "what_we_actually_did": ["overview", "technical details", {"results": ['experiment 0', {'experiment 1': ['background', 'setup', 'observations']}]}, "discussions"], 
-            "conclusion": ["summary", "future work", "concluding remarks"]
+    "operation topic": ['overview',
+        {'issues with different methods': [
+                "Automated processing (of unstructured data)",
+                "Knowledge Management"
+        ]
+        },
+        "High-level vision of what we did"
+    ],
+    "technical justification": [
+        "test"
+    ],
+    "what we actually did": [
+        "test"
+    ],
+    "conclusion": [
+        "test"
+    ]
     }
+
+    config['report_structure'] = structure
 
     # Root id
     base_hash = mome.get_short_hash("hello", 15)  # TMP
-
     # Create root node
-    root_contents = {"root contents": "to_fill_root"}
+    root_contents = {"Control center": momeutils.j_deco(setup_control_center_from_hls(structure)),
+                     "Section structure": momeutils.j_deco(setup_section_structure_from_hls(structure)),
+                     "Results": ""}
     root_node_path = mome.add_node_to_graph(
         graph_folder=config['interactive_graph_path'],
         contents=root_contents,
@@ -197,8 +398,92 @@ def make_graph(config_path=None, **kwargs):
         use_hash=False
     )
 
+    config['current_hash'] = base_hash
+
     # Create nodes recursively
-    create_nodes_recursively(config['interactive_graph_path'], structure, root_node_path, level=0, part=0, parent_hash=base_hash)
+    create_nodes_recursively(config['current_hash'], config['interactive_graph_path'], structure, root_node_path, level=0, part=0, parent_hash=base_hash)
+    save_config(config, config_path)
+
+def get_control_center(node): 
+    return momeutils.parse_json(mome.get_node_section(node, "Control center"))  
+
+def get_section_structure(node):
+    return momeutils.parse_json(mome.get_node_section(node, "Section structure"))
+
+
+def propagate(config_path=None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    full_dynasty_formatted = format_dynasty(mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md"), include_root=True, preserve_hierarchy=True))
+    focus_node_path = os.path.join(config['interactive_graph_path'], config['focus_node'] + ".md")
+    control_center = get_control_center(focus_node_path)
+    links = mome.get_node_links(focus_node_path)
+    non_filled = {}
+    for i, (k,l) in enumerate(zip(control_center.keys(), links)):
+        link_path = os.path.join(config['interactive_graph_path'], l + ".md")
+        if control_center[k]['template'] == "direct": 
+            link_control_center = get_control_center(os.path.join(config['interactive_graph_path'], l + ".md"))
+
+            before = list(control_center.keys())[:i]
+            before = before if len(before) > 0 else None
+            after = list(control_center.keys())[i+1:]
+            after = after if len(after) > 0 else None
+
+            
+            hierarchy_location = formatted_path_to_children(full_dynasty_formatted, l)
+
+            link_control_center = update_existing_structure(link_control_center, 
+                                                            hierarchy_location = hierarchy_location,
+                                                            content = control_center[k]['user_instruction'], 
+                                                            things_said_before = before,
+                                                            where_this_is_going = after)
+            mome.update_section(link_path, 
+                                "Control center",
+                                momeutils.j_deco(link_control_center))
+        elif control_center[k]['template'] == "default": 
+            # insert in initial contents
+            section_structure = momeutils.parse_json(mome.get_node_section(link_path, "Section structure"))
+            section_structure = update_existing_structure(section_structure, 
+                                                          initial_contents = control_center[k]['user_instruction'])
+            mome.update_section(link_path,
+                                "Section structure", 
+                                momeutils.j_deco(section_structure))
+            leftovers = pour_info(config_path, focus_node = l)
+            non_filled[config['focus_node']] = leftovers
+            non_filled[l] = propagate(config_path, focus_node = l)
+    return non_filled
+            
+            
+
+def pour_info(config_path=None, **kwargs):
+    config = load_config(config_path, **kwargs)
+
+    focus_node_path = os.path.join(config['interactive_graph_path'], config['focus_node'] + ".md")
+
+    section_structure = momeutils.parse_json(mome.get_node_section(focus_node_path, "Section structure"))
+    
+    full_hierarchy = format_dynasty(mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
+                                                , include_root = True, preserve_hierarchy = True))
+    test = determine_text_relevance_to_section(text = section_structure['initial_contents'],
+                                               hierarchy=json.dumps(full_hierarchy, indent = 4), 
+                                               target_section=os.path.basename(focus_node_path).split('.')[0])
+    
+    leftovers = []
+    results = simple_extract(sample_text = section_structure['initial_contents'], 
+                             sections = section_structure['subs_titles'],)
+    for k,v in results.items():
+        if v is None or v.strip().lower() == "null": 
+            leftovers.append(k)
+    control_center = momeutils.parse_json(mome.get_node_section(focus_node_path, "Control center"))
+
+    for i, (s,k) in enumerate(zip(section_structure['subs_titles'], results.keys())): 
+        control_center[s]['user_instruction'] = results[k]
+        # Add additional details here
+    
+    # updating sections 
+    mome.update_section(focus_node_path, "Control center", momeutils.j_deco(control_center))
+
+    save_config(config, config_path)
+    return leftovers
 
 def is_leaf(current_node, target_tag = "results"): 
     tags= mome.get_file_tags(current_node)
@@ -214,63 +499,26 @@ def compile(config_path=None, **kwargs):
         _, result_nodes = mome.collect_node_contents(config['interactive_graph_path'], tags = ['results'], return_paths = True)
         to_compile = [n for n in node_dynasty if n in result_nodes]
     print("\n* ".join([''] + [os.path.basename(n).split('.')[0] for n in to_compile]))
+    compilation_results = {}
     for c in to_compile: 
-        compile_node(c)
+        compilation_results[os.path.basename(c).split('.')[0].split('_')[-2]] = compile_node(c)
+    
+    momeutils.crline('Compilation results: \n{}'.format(json.dumps(compilation_results, indent = 4)))
+
 
 def compile_node(c, target_section = "Control center"): 
     paragraph_controls = momeutils.parse_json(mome.get_node_section(c, target_section))
+    if paragraph_controls['content'] is None: 
+        return False 
     
-    result = paragraph_writer(json.dumps(paragraph_controls, indent = 4))
+    paragraph_reprez = {k:v for (k, v) in paragraph_controls.items() if (k != "nb_paragraphs" and v is not None)}
+    paragraph_reprez = json.dumps(paragraph_reprez, indent = 4)
+    test = generate_paragraph_subcontents(paragraph_reprez, paragraph_controls['nb_paragraphs'])
+    input('o k ? ')
+    result = paragraph_writer_enhanced(json.dumps(paragraph_controls, indent = 4))
 
     mome.update_section(c, "Results", result)
-
-# def recursive_graph_maker(config_path, parent, current_structure):
-    
-#     config = load_config(config_path)
-#     graph_folder = config['interactive_graph_path']
-#     for k in current_structure.keys(): 
-#         # print(k)
-#         struct_below = current_structure[k]
-#         node_contents = []
-#         for i, s in enumerate(struct_below): 
-#             if isinstance(s, str): 
-#                 node_contents.append({"template" : 'direct',
-#                                       "title" : s, 
-#                                      "content": f"{s} is a paragraph"})
-#             elif isinstance(s, dict): 
-
-#                 sample_sub_keys = [f'{k} requires some reflexion']
-#                 node_contents.append({"template": 'default',
-#                                       "title" : s, 
-#                                       "content": ", ".join(sample_sub_keys)})
-
-#         section_node = mome.add_node_to_graph(graph_folder,
-#                                                 contents = {"Base contents": "Needs contents compilation", #momeutils.j_deco({o:"\n* ".join([""] + out[o]) for o in out.keys()}),
-#                                                             "Control center": "Needs control compilation", #momeutils.j_deco(control_params), 
-#                                                             "Section structure": momeutils.j_deco(setup_section_structure(". ".join([n['content'] for n in node_contents]).capitalize())),  # that's the original + some controls (in case we wanna regen)
-#                                                             "Results": ""},
-#                                                 tags = ['section'],
-#                                                 parent_path = parent, 
-#                                                 node_prefix = re.sub(r'[^a-zA-Z0-9\s]', '', k).strip().lower().replace(' ', '_'), 
-#                                                 use_hash = False)
-#         print('Created section node {}'.format(section_node))
-        
-#         # confirming to propagate to base and control
-#         do_section_struct_to_base_contents(section_node)
-
-#         # here update control based on previously collected data 
-#         section_controls = momeutils.parse_json(mome.get_node_section(section_node, "Control center"))
-#         for i, (k, nc) in enumerate(zip(section_controls.keys(), node_contents)): 
-#             section_controls[k]['template'] = nc['template']
-#         mome.update_section(section_node, "Control center", momeutils.j_deco(section_controls))
-
-#         # then, expand using node_expansion_colab
-#         new_tmp_config = node_expansion_colab(config_path, focus_node = os.path.basename(section_node).split('.')[0])
-#         for i in range(len(node_contents)): 
-#             node_contents[i]['link'] = new_tmp_config['last_nodes_added'][i]
-#             if node_contents[i]['template'] != "direct": 
-#                 # input(struct_below)
-#                 recursive_graph_maker(config_path, node_contents[i]['link'], struct_below[i])
+    return True
 
 
 def node_expansion_colab(config_path = None, **kwargs): 
@@ -306,12 +554,20 @@ def node_expansion_colab(config_path = None, **kwargs):
     save_config(config, config_path)
     return config
 
-def make_theme_template(**kwargs): 
+def update_existing_structure(structure, **kwargs): 
+    for k, v in kwargs.items(): 
+        if k in structure.keys(): 
+            structure[k] = v
+    return structure
+
+def initiate_control_center(**kwargs): 
     c = {
+        "hierarchy_location": None, 
         "high_level_context": None, 
-        "content": None,
         "things_said_before": None, 
+        "content": None,
         "where_this_is_going": None,
+        "nb_paragraphs": 3,
         "examples": None, 
         "specific_viewpoint": None, 
         "references": None,
@@ -336,7 +592,7 @@ def add_subnode_from_contents_control(config, focus_node_path, contents, control
     if control['template'].strip().lower() == "direct": # means that this is going to be directly used to write 
             tag = ['to_compile']
             focus_contents = momeutils.parse_json(mome.get_node_section(focus_node_path)) # Collects the first section
-            t = make_theme_template(content = contents, 
+            t = initiate_control_center(content = contents, 
                                     things_said_before = "\n".join([focus_contents[kk] for kk in list(focus_contents.keys())[:list(focus_contents.keys()).index(subname)]]),
                                     where_this_is_going = "\n".join([kk for kk in list(focus_contents.keys())[list(focus_contents.keys()).index(subname)+1:]]),
                                     )
@@ -454,7 +710,47 @@ def setup_control_params(suggested_sections):
     return {part: get_default_section_dict() for part in parts}
 
 
+
+
 if __name__ == "__main__": 
 
-    # make_graph(os.path.join(os.path.dirname(__file__), "config_ti.json"))
-    compile(os.path.join(os.path.dirname(__file__), "config_ti.json"))
+    config_path = os.path.join(os.path.dirname(__file__), "config_{}.json".format(os.path.basename(__file__).split('.')[0]))
+    # a file containing debugging contents
+    rationale_path = os.path.join(os.path.dirname(__file__), "contents_ainimals.json")
+    rationales = json.load(open(rationale_path))
+    make_graph(config_path)
+    # updating root
+    config = json.load(open(config_path))
+
+    section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"))
+    section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
+    
+    # UPDATING ROOT 
+    mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
+
+    # UPDATING OPERATION TOPIC 
+    section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"))
+    section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
+    mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
+
+
+
+
+
+    # # compile(os.path.join(os.path.dirname(__file__), "config_ti.json"))
+    # x = """In this initial experiment, we wanted to try and train a model using a synthetic dataset that featured no spurrious correlation. The goal was to have the model learn the correct relationships and then use those on real data to see transfer. While we had some hope, it's definitely not trivial, we checked many models but didn't get convincing results, suggesting we're still missing something. And then, we actually looked at activation maps to see which features were supposed to trigger the model"""
+    # section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl1_part2_Results_56e0e704b60fcee.md"))    
+    # section_structure = update_existing_structure(section_structure, initial_contents = x)
+    # input(section_structure)
+    # mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl1_part2_Results_56e0e704b60fcee.md"), momeutils.j_deco(section_structure), "Section structure")
+    # mome.set_active_node(os.path.join(os.path.dirname(__file__), "sir_interactive_graph"), 
+    #                     "lvl1_part2_Results_56e0e704b60fcee.md") 
+    # input(' move to lvl1_part2_Results_56e0e704b60fcee')
+    # pour_info(os.path.join(os.path.dirname(__file__), "config_ti.json"))
+    # propagate(os.path.join(os.path.dirname(__file__), "config_ti.json"))
+
+    # lvl1_part0_Summary_223e136940ee14f
+
+
+    # operation_topic = """Deep Learning Models: We're using advanced models like Convolutional Neural Networks (CNNs) and Recurrent Neural Networks (RNNs) to classify spectrograms, which are visual representations of signal frequencies over time.\nWhy It’s Better: First, automated feature extraction means no need for manual feature design; the models learn directly from raw data. Second, higher accuracy is achieved because these models capture complex patterns, leading to better performance, especially in critical areas like speech recognition and medical diagnostics. Third, scalability allows them to handle large and complex datasets efficiently. Fourth, noise robustness ensures they work well even with noisy data. Lastly, transfer learning means pre-trained models can be adapted to new tasks quickly, saving time and data"""
+    
