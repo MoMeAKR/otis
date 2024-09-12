@@ -558,17 +558,39 @@ def compile(config_path=None, **kwargs):
         _, result_nodes = mome.collect_node_contents(config['interactive_graph_path'], tags = ['results'], return_paths = True)
         to_compile = [n for n in node_dynasty if n in result_nodes]
     print("\n* ".join([''] + [os.path.basename(n).split('.')[0] for n in to_compile]))
+    
+    # RUNNING THE ACTUAL COMPILATION
     compilation_results = {}
     for c in to_compile: 
+        # COMPILE RETURNS A DICT
         compilation_results[os.path.basename(c).split('.')[0].split('_')[-2]] = compile_node(c)
+        # ADDING A KEY TO KEEP TRACK OF THE LEVEL OF THE NODE (SECTION, SUBSECTION, SUBSUBSECTION...)
+        compilation_results[os.path.basename(c).split('.')[0].split('_')[-2]]['lvl'] = int(os.path.basename(c).split('.')[0].split('_')[0].replace('lvl', ''))
+        compilation_results[os.path.basename(c).split('.')[0].split('_')[-2]]['part'] = int(os.path.basename(c).split('.')[0].split('_')[1].replace('part', ''))
+        compilation_results[os.path.basename(c).split('.')[0].split('_')[-2]]['name'] = os.path.basename(c).split('.')[0].split('_')[-2]
+        # input(compilation_results[list(compilation_results.keys())[-1]]['lvl'])
     
-    momeutils.crline('Compilation results: \n{}'.format(json.dumps(compilation_results, indent = 4)))
+    # FORMATTING 
+    if not is_leaf(focus_node_path): 
+        compiled_text = []
+        for k in compilation_results.keys(): 
+            # section_type = "section" if compilation_results[k]['lvl'] == 0 else "sub" * compilation_results[k]['lvl'] + "section"
+            compiled_text.append(fill_section_template(compilation_results[k]))
+        mome.update_section(focus_node_path, "Results", "\n\n".join(compiled_text))
+        # mome.update_section(focus_node_path, "Results", "\n\n".join([compilation_results[k]['result'] for k in compilation_results.keys()]))
+    momeutils.crline('Compilation results: \n{}'.format(json.dumps([compilation_results[k]['compiled'] for k in compilation_results.keys()], indent = 4)))
+
+def fill_section_template(current_result):
+    # ASSUMING .section_template.txt exists in the folder 
+    template = open(os.path.join(os.path.dirname(__file__), '.section_template.txt'), 'r').read()
+    section_type = "section" if current_result['lvl'] == 0 else "sub" * current_result['lvl'] + "section"
+    return template.replace('section_type', section_type).replace('ZENAME', current_result['name']).replace('ZEPART', str(current_result['part'])).replace('ZERESULT', current_result['result'])
 
 
 def compile_node(c, target_section = "Control center"): 
     paragraph_controls = momeutils.parse_json(mome.get_node_section(c, target_section))
     if paragraph_controls['content'] is None: 
-        return False 
+        return {'compiled': False, 'result': f'No content to compile for {c}'}
     
     paragraph_reprez = {k:v for (k, v) in paragraph_controls.items() if (k != "nb_paragraphs" and v is not None)}
     paragraph_reprez = json.dumps(paragraph_reprez, indent = 4)
@@ -581,7 +603,7 @@ def compile_node(c, target_section = "Control center"):
     # result = paragraph_writer_enhanced(json.dumps(paragraph_controls, indent = 4))
 
     mome.update_section(c, "Results", result)
-    return True
+    return {'compiled': True, 'result': result}
 
 
 def node_expansion_colab(config_path = None, **kwargs): 
