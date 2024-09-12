@@ -89,25 +89,52 @@ def paragraph_writer(paragraph_template = None):
     
     icl_examples = momeutils.load_icl(inspect.currentframe())
     
+
     messages = [
             {"role": "system", "content": """
-    You are a writing assistant with expertise in producing well-structured and coherent paragraphs. You are expected to generate a paragraph based on a provided template and a set of critical elements. 
+    You are a writing assistant with expertise in producing well-structured and coherent paragraphs. You are expected to use the provided template and precisely follow the guidelines. 
     Answer in a JSON format as follows:
     ```json
     {{
-    
-        "result" : "The generated paragraph based on the provided template and critical elements."
-    
+        "results":{{
+{result}
+             }}
     }} 
     ```
-    """}, 
-        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Paragraph Template\n{}\n\nUse the provided paragraph template to produce a well-structured and coherent paragraph under the key 'result'.\n\n".format(icl_examples, paragraph_template)}
+    """.format(result = ",\n".join(["\"paragraph_{i}\": \"Paragraph {i} based on the provided template and critical elements.\"".format(i = i) for i in range(len(paragraph_template))]))},
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Paragraph Template\n{}\n\nUse the provided paragraph template to produce a well-structured and coherent text under the key 'result'.\n\n".format(icl_examples, paragraph_template)}
     ]
-    
+    momeutils.dj(messages)
     results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
     momeutils.crprint(json.dumps(results, indent = 4))
     
     return results["result"]
+
+def paragraph_writer2(paragraph_template = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+
+    messages = [
+            {"role": "system", "content": """
+You are a writing assistant with expertise in producing well-structured and coherent contents. You are expected to use the provided high-level layout and generate clear, well-structured and convincing text. 
+Answer in a JSON format as follows:
+    ```json
+    {{
+        "contents":"Your resulting contents"
+    }} 
+    ```
+    """},
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n High-level layout\n{}\n\nUse the provided layout template to produce a well-structured and coherent text under the key 'contents'. To prevent formatting issues, use '\\n' in your answer to represent line breaks \n\n".format(icl_examples, "\n* ".join([''] + paragraph_template))}
+    ]
+
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+        print(initial_answer)
+    momeutils.crprint(json.dumps(results, indent = 4))
+    
+    return results["contents"]
 
 def paragraph_writer_enhanced(paragraph_template = None): 
 
@@ -152,16 +179,16 @@ def simple_extract(sample_text = None, sections = None):
     messages = [
             {"role": "system", "content": """
 You are an expert annotator assisting the user in structuring text. You will be provided with a text and a list of sections (for an global perspective).  
-Your task is to provide some answer to each target section, while being mindful of the broader context. If nothing matches, answer with 'null'
+Your task is to identify and sum up how the root text could fill each target section, while being mindful of the broader context. If nothing matches, answer with 'null'
 Answer in a JSON format as follows:
     ```json
     {{
 {sections}
     }} 
     ```
-    """.format(sections = "\n".join(['"{sectionf}": contents that support the **{section}** subsection",'.format(sectionf = section.lower().strip().replace(' ', "_"), section = section) for section in sections]))}, 
+    """.format(sections = "\n".join(['"{sectionf}": What could fill the **{section}** subsection, based on the provided context",'.format(sectionf = section.lower().strip().replace(' ', "_"), section = section) for section in sections]))}, 
      
-        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Root text (serving as a knowledge repository)\n{}\n\n Sections\n{}\n\nGiven the root text and a list of sections, sum up some elements from the root text that could serve as justifications or supporting information for our section of interest. Try and be accurate and mindful of other sections, that is, not all content must be used and if nothing relates to the current elements, please use null.\n\n".format(icl_examples, sample_text, sections)}
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Root text (serving as a knowledge repository)\n{}\n\n Sections\n{}\n\nGiven the root text and a list of sections, sum up some elements from the root text that could serve as justifications or supporting information for our section of interest (feel free to rephase instead of simply copy pasting things out). Try and be accurate and mindful of other sections, that is, not all content must be used and if nothing relates to the current elements, please use null.\n\n".format(icl_examples, sample_text, sections)}
     ]
 
     results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
@@ -181,7 +208,8 @@ def init_config_file(config_path):
             "technical_justification": ["related works and their limitation", "why we should go in the direction we chose"], 
         },
         "focus_node": None, 
-        "last_nodes_added": []
+        "last_nodes_added": [],
+        "user_instruction" : None, 
     }
 
     with open(config_path, 'w') as f:
@@ -363,7 +391,8 @@ def make_graph(config_path=None, **kwargs):
 
     structure = {
     "operation topic": ['overview',
-        {'issues with different methods': [
+        {'Limitations of our previous perspective and what is wrong with other methods': [
+                "Focus on local problems instead of systemic solutions",
                 "Automated processing (of unstructured data)",
                 "Knowledge Management"
         ]
@@ -451,21 +480,29 @@ def propagate(config_path=None, **kwargs):
             non_filled[config['focus_node']] = leftovers
             non_filled[l] = propagate(config_path, focus_node = l)
     return non_filled
-            
-            
 
+def collect_hierarchy_to_focus_node(config):
+    return collect_hierarchy_to_children(config, config['focus_node'])
+     
+def collect_hierarchy_to_children(config, target_node_path): 
+    root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
+    hierarchy = formatted_path_to_children(format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True)), target_node_path)
+    return hierarchy
+    
 def pour_info(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
 
     focus_node_path = os.path.join(config['interactive_graph_path'], config['focus_node'] + ".md")
-
+    # root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
+    # hierarchy = formatted_path_to_children(format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True)), config['focus_node'])
+    hierarchy = collect_hierarchy_to_focus_node(config)
     section_structure = momeutils.parse_json(mome.get_node_section(focus_node_path, "Section structure"))
     
     full_hierarchy = format_dynasty(mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
                                                 , include_root = True, preserve_hierarchy = True))
-    test = determine_text_relevance_to_section(text = section_structure['initial_contents'],
-                                               hierarchy=json.dumps(full_hierarchy, indent = 4), 
-                                               target_section=os.path.basename(focus_node_path).split('.')[0])
+    # test = determine_text_relevance_to_section(text = section_structure['initial_contents'],
+    #                                            hierarchy=json.dumps(full_hierarchy, indent = 4), 
+    #                                            target_section=os.path.basename(focus_node_path).split('.')[0])
     
     leftovers = []
     results = simple_extract(sample_text = section_structure['initial_contents'], 
@@ -477,6 +514,11 @@ def pour_info(config_path=None, **kwargs):
 
     for i, (s,k) in enumerate(zip(section_structure['subs_titles'], results.keys())): 
         control_center[s]['user_instruction'] = results[k]
+        
+        if k in leftovers: 
+            p = "Consider the following user-provided text: **{}**\n\nWe were trying to identify content for a section named {} and containing the following subsections {}. \n\nSpecifically, focus is on {}.Here is its positionning in the document hierarchy: \n{}\n\nIn the initial pass, it was deemed that the user-provided text did not contain relevant information to the target section. Based on your expert knowledge, suggest meaningful and insightful contents, topic or concepts that could enhance the current guidelines ? Your answer must go directly to the specifics (aka, directly provide your suggestions, avoid starting with unnecessary 'To enhance guidelines, blabla')".format(section_structure['initial_contents'], config['focus_node'].split('_')[-2], "\n*".join([''] + section_structure['subs_titles']), s, " ".join(["\n" + "\t" * i +"* " + h for i, h in enumerate(hierarchy)]))
+            # input(p)
+            control_center[s]['model_suggestion'] = momeutils.basic_task(p, model = 'g4o')
         # Add additional details here
     
     # updating sections 
@@ -484,6 +526,23 @@ def pour_info(config_path=None, **kwargs):
 
     save_config(config, config_path)
     return leftovers
+
+def more_contents(config_path = None, **kwargs):
+    config = load_config(config_path, **kwargs)
+
+    focus_node_path = os.path.join(config['interactive_graph_path'], config['focus_node'] + ".md")
+    if config['user_instruction'] is not None and config['user_instruction'].strip() != '': 
+        hierarchy = collect_hierarchy_to_focus_node(config)
+        section_structure =get_section_structure(focus_node_path) 
+        subs = get_section_structure(focus_node_path)['subs_titles']
+        p = "As an efficient AI writing assistant, you are to provide insightful complementary ideas to the user based on the following information. \n Section location in the document hierarchy : \n{}\n Focus section is {}\n Subsections in this section are: \n{}\n\n The user has provided the following initial text: \n{}\n\nFinally, the user has also provided the following instruction: {}\n\nBased on this global view, rewrite/expand/enhance the initial provided text taking into account the additional instruction.".format("\n".join(["\t" + h for h in hierarchy]), config['focus_node'].split('_')[-2], "\n".join(["\t* " + s for s in subs]), section_structure['initial_contents'], config['user_instruction'])
+        out = momeutils.basic_task(p, model = 'g4o')
+        valid = momeutils.u_valid()
+        if valid: 
+            section_structure = update_existing_structure(section_structure, initial_contents = out)  
+            mome.update_section(focus_node_path, "Section structure", momeutils.j_deco(section_structure))
+    save_config(config, config_path)  
+            
 
 def is_leaf(current_node, target_tag = "results"): 
     tags= mome.get_file_tags(current_node)
@@ -514,8 +573,12 @@ def compile_node(c, target_section = "Control center"):
     paragraph_reprez = {k:v for (k, v) in paragraph_controls.items() if (k != "nb_paragraphs" and v is not None)}
     paragraph_reprez = json.dumps(paragraph_reprez, indent = 4)
     test = generate_paragraph_subcontents(paragraph_reprez, paragraph_controls['nb_paragraphs'])
-    input('o k ? ')
-    result = paragraph_writer_enhanced(json.dumps(paragraph_controls, indent = 4))
+    # test= ["hello", "my", "name"]
+    s = "\n\n* Paragraph ".join([''] + [str(i) + f": {t}" for i, t in enumerate(test)])
+    p ="As an expert AI writer, you are provided with a high-level view of some paragraph contents. Based on the information, generate the text for each paragraph: {}".format(s)
+    result = paragraph_writer2(test)
+    # result = momeutils.basic_task(p)
+    # result = paragraph_writer_enhanced(json.dumps(paragraph_controls, indent = 4))
 
     mome.update_section(c, "Results", result)
     return True
