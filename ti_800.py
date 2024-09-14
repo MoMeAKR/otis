@@ -131,7 +131,7 @@ Answer in a JSON format as follows:
     parseable = False
     while not parseable: 
         initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
-        print(initial_answer)
+        # print(initial_answer)
     momeutils.crprint(json.dumps(results, indent = 4))
     
     return results["contents"]
@@ -561,29 +561,45 @@ def compile(config_path=None, **kwargs):
     
     # RUNNING THE ACTUAL COMPILATION
     compilation_results = {}
-    for c in to_compile: 
+    for i, c in enumerate(to_compile): 
+
         # COMPILE RETURNS A DICT
-        compilation_results[os.path.basename(c).split('.')[0].split('_')[-2]] = compile_node(c)
+        current_result = compile_node(c)
+        result_key = os.path.basename(c).split('.')[0].split('_')[-2]
+        lvl = int(os.path.basename(c).split('.')[0].split('_')[0].replace('lvl', ''))
+        part = int(os.path.basename(c).split('.')[0].split('_')[1].replace('part', ''))
         # ADDING A KEY TO KEEP TRACK OF THE LEVEL OF THE NODE (SECTION, SUBSECTION, SUBSUBSECTION...)
-        compilation_results[os.path.basename(c).split('.')[0].split('_')[-2]]['lvl'] = int(os.path.basename(c).split('.')[0].split('_')[0].replace('lvl', ''))
-        compilation_results[os.path.basename(c).split('.')[0].split('_')[-2]]['part'] = int(os.path.basename(c).split('.')[0].split('_')[1].replace('part', ''))
-        compilation_results[os.path.basename(c).split('.')[0].split('_')[-2]]['name'] = os.path.basename(c).split('.')[0].split('_')[-2]
-        # input(compilation_results[list(compilation_results.keys())[-1]]['lvl'])
+        compilation_results[result_key] = current_result
+        compilation_results[result_key]['lvl'] = lvl
+        compilation_results[result_key]['part'] = part
+        compilation_results[result_key]['name'] = result_key
+
     
     # FORMATTING 
     if not is_leaf(focus_node_path): 
         compiled_text = []
+        current_lvl = compilation_results[list(compilation_results.keys())[0]]['lvl']
         for k in compilation_results.keys(): 
-            # section_type = "section" if compilation_results[k]['lvl'] == 0 else "sub" * compilation_results[k]['lvl'] + "section"
+            if compilation_results[k]['lvl'] > current_lvl: 
+                # get the new section: its lvl-th sub_titles from the section structure
+                new_section = get_section_structure(focus_node_path)['subs_titles'][current_lvl]
+                compiled_text.append(fill_section_template({"name": new_section, "lvl": current_lvl}, only_section = True))
+                current_lvl = compilation_results[k]['lvl']
+
             compiled_text.append(fill_section_template(compilation_results[k]))
         mome.update_section(focus_node_path, "Results", "\n\n".join(compiled_text))
         # mome.update_section(focus_node_path, "Results", "\n\n".join([compilation_results[k]['result'] for k in compilation_results.keys()]))
     momeutils.crline('Compilation results: \n{}'.format(json.dumps([compilation_results[k]['compiled'] for k in compilation_results.keys()], indent = 4)))
 
-def fill_section_template(current_result):
+def fill_section_template(current_result, only_section = False):
     # ASSUMING .section_template.txt exists in the folder 
+    
     template = open(os.path.join(os.path.dirname(__file__), '.section_template.txt'), 'r').read()
     section_type = "section" if current_result['lvl'] == 0 else "sub" * current_result['lvl'] + "section"
+    if only_section:
+        template = template.strip().split('\n')[0]
+        template = template.replace('ZENAME', current_result['name']).replace('section_type', section_type)
+        return template
     return template.replace('section_type', section_type).replace('ZENAME', current_result['name']).replace('ZEPART', str(current_result['part'])).replace('ZERESULT', current_result['result'])
 
 
