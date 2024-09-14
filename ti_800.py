@@ -210,6 +210,7 @@ def init_config_file(config_path):
         "focus_node": None, 
         "last_nodes_added": [],
         "user_instruction" : None, 
+        "results_path": None
     }
 
     with open(config_path, 'w') as f:
@@ -381,14 +382,6 @@ def make_graph(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
     mome.init_obsidian_vault(config['interactive_graph_path'], exists_ok=False)
 
-    # Example structure
-    # structure = {
-    #     "operation_topic": ['overview', {'issues_with_different_methods': [{"method_A": ["test0", "test1"]}, "method_B"]}],
-    #     "technical_justification": ["related works and their limitation", "why we should go in the direction we chose"],
-    #     "what_we_actually_did": ["overview", "technical details", {"results": ['experiment 0', {'experiment 1': ['background', 'setup', 'observations']}]}, "discussions"], 
-    #     "conclusion": ["summary", "future work", "concluding remarks"]
-    # }
-
     structure = {
     "operation topic": ['overview',
         {'Limitations of our previous perspective and what is wrong with other methods': [
@@ -559,27 +552,99 @@ def compile(config_path=None, **kwargs):
         to_compile = [n for n in node_dynasty if n in result_nodes]
     print("\n* ".join([''] + [os.path.basename(n).split('.')[0] for n in to_compile]))
     
-    # RUNNING THE ACTUAL COMPILATION
-    compilation_results = {}
-    for i, c in enumerate(to_compile): 
 
-        # COMPILE RETURNS A DICT
-        current_result = compile_node(c)
-        result_key = os.path.basename(c).split('.')[0].split('_')[-2]
-        lvl = int(os.path.basename(c).split('.')[0].split('_')[0].replace('lvl', ''))
-        part = int(os.path.basename(c).split('.')[0].split('_')[1].replace('part', ''))
-        # ADDING A KEY TO KEEP TRACK OF THE LEVEL OF THE NODE (SECTION, SUBSECTION, SUBSUBSECTION...)
-        compilation_results[result_key] = current_result
-        compilation_results[result_key]['lvl'] = lvl
-        compilation_results[result_key]['part'] = part
-        compilation_results[result_key]['name'] = result_key
+    # RUNNING THE ACTUAL COMPILATION
+    compilation_results = json.load(open('tmp.json'))
+    # compilation_results = {}
+    # for i, c in enumerate(to_compile): 
+
+    #     # COMPILE RETURNS A DICT
+    #     current_result = compile_node(c)
+    #     result_key = os.path.basename(c).split('.')[0].split('_')[-2]
+    #     lvl = int(os.path.basename(c).split('.')[0].split('_')[0].replace('lvl', ''))
+    #     part = int(os.path.basename(c).split('.')[0].split('_')[1].replace('part', ''))
+    #     # ADDING A KEY TO KEEP TRACK OF THE LEVEL OF THE NODE (SECTION, SUBSECTION, SUBSUBSECTION...)
+    #     compilation_results[result_key] = current_result
+    #     compilation_results[result_key]['lvl'] = lvl
+    #     compilation_results[result_key]['part'] = part
+    #     compilation_results[result_key]['name'] = result_key
+
+    update_compilation_results(config, compilation_results)
+    # with open('tmp.json', 'w') as f:
+    #     json.dump(compilation_results, f, indent = 4)
+    input(' ok ')
+
+    fill_obsidian(config, compilation_results)
+
+
+def update_compilation_results(config, compilation_results):    
+    # init 
+    if not os.path.exists(os.path.dirname(config['results_path'])): 
+        os.makedirs(os.path.dirname(config['results_path']))
+        with open(config['results_path'], 'w') as f:
+            json.dump({"structure" : config['report_structure'], "results": config['report_structure']}, f, indent = 4)
+    # update
+    existing_results = json.load(open(config['results_path']))
+
+    def find_node(structure, lvl, part, current_lvl=0, current_part=0, path=[]):
+        if current_lvl == lvl and current_part == part:
+            # print('Found node with lvl {} and part {} - Name {}'.format(lvl, part, path))
+            return path
+        
+        if isinstance(structure, dict):
+            for key, value in structure.items():
+                result = find_node(value, lvl, part, current_lvl + 1, current_part, path + [key])
+                if result:
+                    return result
+        elif isinstance(structure, list):
+            for index, item in enumerate(structure):
+                # print(index, item, 'here', current_lvl)
+                result = find_node(item, lvl, part, current_lvl, index, path + [index])
+                # print("Collected result ", result)
+                if result:
+                    return result
+        return None
 
     
+    # Update the results
+    for k, result in compilation_results.items():
+        lvl = result['lvl']
+        part = result['part']
+        name = result['name']
+        
+        print('\n\nLooking for node with lvl {} and part {} - Name {}'.format(lvl, part, name))
+        # Find the corresponding node in the structure
+        hierarchy = find_node(config['report_structure'], lvl, part, current_lvl = 0, current_part = 0)
+        # print('= ' * 10)
+        # input(hierarchy)
+        if hierarchy:
+            # Navigate to the correct place in the results
+            current_level = existing_results['results']
+            for h in hierarchy[:-1]:
+                current_level = current_level[h]
+
+            
+            
+            if isinstance(current_level, dict): 
+                current_level[hierarchy[-1]][part] = {current_level[hierarchy[-1]][part]: result['result']}
+            elif isinstance(current_level, list):
+                current_level[part] = {current_level[part]: result['result']}
+
+    # Save the updated results
+    with open(config['results_path'], 'w') as f:
+        json.dump(existing_results, f, indent=4)
+
+    
+def fill_obsidian(config, compilation_results):
+
+    focus_node_path = os.path.join(config['interactive_graph_path'], config['focus_node'] + ".md")
     # FORMATTING 
     if not is_leaf(focus_node_path): 
         compiled_text = []
         current_lvl = compilation_results[list(compilation_results.keys())[0]]['lvl']
         for k in compilation_results.keys(): 
+
+            # TAKING INTO ACCOUNT SECTION CHANGES WHEN COMPILING
             if compilation_results[k]['lvl'] > current_lvl: 
                 # get the new section: its lvl-th sub_titles from the section structure
                 new_section = get_section_structure(focus_node_path)['subs_titles'][current_lvl]
