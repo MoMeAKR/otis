@@ -210,7 +210,8 @@ def init_config_file(config_path):
         "focus_node": None, 
         "last_nodes_added": [],
         "user_instruction" : None, 
-        "results_path": None
+        "results_path": None, 
+        "report_path": os.path.join(os.path.dirname(__file__), 'reports')
     }
 
     with open(config_path, 'w') as f:
@@ -407,6 +408,7 @@ def make_graph(config_path=None, **kwargs):
 
     # Root id
     base_hash = mome.get_short_hash("hello", 15)  # TMP
+    
     # Create root node
     root_contents = {"Control center": momeutils.j_deco(setup_control_center_from_hls(structure)),
                      "Section structure": momeutils.j_deco(setup_section_structure_from_hls(structure)),
@@ -421,6 +423,7 @@ def make_graph(config_path=None, **kwargs):
     )
 
     config['current_hash'] = base_hash
+    config['results_path'] = os.path.join(os.path.dirname(config['report_path']), "results", f"results_{base_hash}.json")
 
     # Create nodes recursively
     create_nodes_recursively(config['current_hash'], config['interactive_graph_path'], structure, root_node_path, level=0, part=0, parent_hash=base_hash)
@@ -570,25 +573,53 @@ def compile(config_path=None, **kwargs):
     #     compilation_results[result_key]['name'] = result_key
 
     update_compilation_results(config, compilation_results)
-    # with open('tmp.json', 'w') as f:
-    #     json.dump(compilation_results, f, indent = 4)
-    input(' ok ')
-
+    # input(' ok ')
+    produce_latex(config)
     fill_obsidian(config, compilation_results)
 
+def produce_latex(config):
+    if not os.path.exists(config['report_path']):
+        os.makedirs(config['report_path'])
+    contents = json.load(open(config['results_path']))['results']
+    latex_content = []
 
-def update_compilation_results(config, compilation_results):    
-    # init 
-    if not os.path.exists(os.path.dirname(config['results_path'])): 
+    def traverse_structure(structure, level):
+        if isinstance(structure, dict):
+            for key, value in structure.items():
+                if level == 0:
+                    latex_content.append(f"\\section{{{key}}}")
+                elif level == 1:
+                    latex_content.append(f"\\subsection{{{key}}}")
+                elif level == 2:
+                    latex_content.append(f"\\subsubsection{{{key}}}")
+                else:
+                    latex_content.append(f"\\paragraph{{{key}}}")
+                
+                traverse_structure(value, level + 1)
+        elif isinstance(structure, list):
+            for item in structure:
+                traverse_structure(item, level)
+        elif isinstance(structure, str):
+            latex_content.append(structure)
+
+    traverse_structure(contents, 0)
+    with open(os.path.join(config['report_path'], 'report.tex'), 'w') as f:
+        f.write("\n\n".join(latex_content))
+
+
+def update_compilation_results(config, compilation_results):
+    # Initialize the results file if it doesn't exist
+    if not os.path.exists(os.path.dirname(config['results_path'])):
         os.makedirs(os.path.dirname(config['results_path']))
         with open(config['results_path'], 'w') as f:
-            json.dump({"structure" : config['report_structure'], "results": config['report_structure']}, f, indent = 4)
-    # update
-    existing_results = json.load(open(config['results_path']))
-
+            json.dump({"structure": config['report_structure'], "results": config['report_structure']}, f, indent=4)
+    
+    # Load existing results
+    with open(config['results_path'], 'r') as f:
+        existing_results = json.load(f)
+    
     def find_node(structure, lvl, part, current_lvl=0, current_part=0, path=[]):
         if current_lvl == lvl and current_part == part:
-            # print('Found node with lvl {} and part {} - Name {}'.format(lvl, part, path))
             return path
         
         if isinstance(structure, dict):
@@ -598,14 +629,11 @@ def update_compilation_results(config, compilation_results):
                     return result
         elif isinstance(structure, list):
             for index, item in enumerate(structure):
-                # print(index, item, 'here', current_lvl)
                 result = find_node(item, lvl, part, current_lvl, index, path + [index])
-                # print("Collected result ", result)
                 if result:
                     return result
         return None
 
-    
     # Update the results
     for k, result in compilation_results.items():
         lvl = result['lvl']
@@ -614,25 +642,26 @@ def update_compilation_results(config, compilation_results):
         
         print('\n\nLooking for node with lvl {} and part {} - Name {}'.format(lvl, part, name))
         # Find the corresponding node in the structure
-        hierarchy = find_node(config['report_structure'], lvl, part, current_lvl = 0, current_part = 0)
-        # print('= ' * 10)
-        # input(hierarchy)
+        hierarchy = find_node(config['report_structure'], lvl, part, current_lvl=0, current_part=0)
+        
         if hierarchy:
             # Navigate to the correct place in the results
             current_level = existing_results['results']
             for h in hierarchy[:-1]:
                 current_level = current_level[h]
-
             
-            
-            if isinstance(current_level, dict): 
-                current_level[hierarchy[-1]][part] = {current_level[hierarchy[-1]][part]: result['result']}
+            if isinstance(current_level, dict):
+                if isinstance(current_level[hierarchy[-1]], list):
+                    current_level[hierarchy[-1]][part] = {name: result['result']}
+                elif isinstance(current_level[hierarchy[-1]], str):
+                    current_level[hierarchy[-1]] = {name: result['result']}
             elif isinstance(current_level, list):
-                current_level[part] = {current_level[part]: result['result']}
-
+                current_level[part] = {name: result['result']}
+    
     # Save the updated results
     with open(config['results_path'], 'w') as f:
         json.dump(existing_results, f, indent=4)
+
 
     
 def fill_obsidian(config, compilation_results):
@@ -685,6 +714,86 @@ def compile_node(c, target_section = "Control center"):
 
     mome.update_section(c, "Results", result)
     return {'compiled': True, 'result': result}
+
+def get_focus_node(config, targets = ['Section structure', 'Control section']): 
+
+    focus_node_path = os.path.join(config['interactive_graph_path'], config['focus_node'] + ".md")
+    result = {"path": focus_node_path}
+    for t in targets:
+        if mome.check_section(focus_node_path, t): 
+            result[t.lower().replace('section', '').strip()] = momeutils.parse_json(mome.get_node_section(focus_node_path, t))
+    
+    return result
+
+def tmp_key_formatting(s):
+    result = []
+    for char in s:
+        if char.isupper():
+            if result:  # Avoid adding a space at the beginning
+                result.append(' ')
+            result.append(char.lower())
+        else:
+            result.append(char)
+    return ''.join(result)
+
+
+def find_next_level_structure(report_structure, hierarchy):
+
+    next_level_structure = report_structure
+
+    for level in hierarchy[1:]: 
+        # print(level, tmp_key_formatting(level))
+        if isinstance(next_level_structure, dict):
+            for k in next_level_structure.keys():
+                if k.lower() == tmp_key_formatting(level):
+                    next_level_structure = next_level_structure[k]
+                    # print('Found {}'.format(k))
+                    # print('Structure:\n{}'.format(next_level_structure))
+                    break
+        elif isinstance(next_level_structure, list):
+            for i, v in enumerate(next_level_structure):
+                str_v = v if isinstance(v, str) else list(v.keys())[0]
+                if str_v.lower() == tmp_key_formatting(level):
+                    next_level_structure = next_level_structure[i]
+                    # print('Found {}'.format(str_v))
+                    # print('Structure:\n{}'.format(next_level_structure))
+                    break                   
+
+    children = []
+    if isinstance(next_level_structure, dict):
+        next_level_structure = list(next_level_structure.values())[0]
+    for c in next_level_structure: 
+        if isinstance(c, dict): 
+            children.append(list(c.keys())[0])
+        elif isinstance(c, str): 
+            children.append(c)
+        else: 
+            raise TypeError('Unrecognized type {} for next level structure {}'.format(type(c), c))  
+    return children
+        
+
+def structure_propagation(config_path = None, **kwargs): 
+    config= load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    hierarchy = collect_hierarchy_to_focus_node(config)
+    
+    # collect the initial contents (first level) from the report structure 
+    next_level_structure = find_next_level_structure(config['report_structure'], hierarchy)
+    
+    input(next_level_structure)
+    # DO NOT USE THE SECTION STRUCTURE BECAUSE THE USER MIGHT HAVE MODIFIED IT ! USE THE REPORT STRUCTURE FROM CONFIG['REPORT_STRUCTURE']
+    if next_level_structure != focus_node['structure']['subs_titles']: # if the user has updated something 
+        # TODO 1 are there remaining nodes or has the user changed everything ? 
+
+        # TODO 2 based on the user provided structure, figure out how the downstream names must change for the already existing nodes
+
+        # TODO 3 delete and reproduce the nodes under the correct names (for those that already existed)
+
+        # TODO 4 update the necessary structures 
+
+        # TODO 5 create the new node(s)
+        pass
+        
 
 
 def node_expansion_colab(config_path = None, **kwargs): 
@@ -885,7 +994,8 @@ if __name__ == "__main__":
     rationale_path = os.path.join(os.path.dirname(__file__), "contents_ainimals.json")
     rationales = json.load(open(rationale_path))
     make_graph(config_path)
-    # updating root
+    # updating root4
+    
     config = json.load(open(config_path))
 
     section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"))
