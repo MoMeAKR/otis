@@ -849,9 +849,11 @@ def structure_propagation(config_path = None, **kwargs):
         
         current_dynasty_dict = dynasty_to_report_structure(current_dynasty)
         formatted_hierarchy = [tmp_key_formatting(h).title() for h in hierarchy[1:]]
-        input(formatted_hierarchy)
+
         momeutils.update_nested_dict(report_structure, formatted_hierarchy, current_dynasty_dict)
-        momeutils.dj(report_structure)
+        
+        config['report_structure'] = report_structure
+        save_config(config, config_path)
         
 def dynasty_to_report_structure(current_dynasty): 
     # recursive function returns a report structure (aka nested dicts with lists) from the dict with path, name, children
