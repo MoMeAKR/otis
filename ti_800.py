@@ -814,10 +814,10 @@ def structure_propagation(config_path = None, **kwargs):
             lvl, part, name, hash = split_node_for_info(current_node_path)
             new_name = f"lvl{lvl}_part{node['current_index']}_{name}_{hash}"
             # ideally, we should also change children names but that would imply first changing leaves and then bringing information back up to ensure links stay valid
-
+            print('ok for {}'.format(current_node_path))
             # mome.obsidian_rename_node(current_node_path, new_name)            
             current_dynasty['children'][node['initial_index']]['path'] = os.path.join(os.path.dirname(current_node_path), f"{new_name}.md")
-
+        input('ok ')
         # Prepare missing nodes creation --> nodes should be added in 'pour' so that changes in the template can be handled 
         for node in to_add:
             current_contents = get_default_section_dict()
@@ -866,6 +866,7 @@ def dynasty_to_report_structure(current_dynasty):
             # If the node has children, recursively convert them
             report_structure[node_name] = [dynasty_to_report_structure(node)]
         else:
+            input(node)
             # If the node has no children, it's a leaf node
             report_structure[node_name] = []
 
@@ -874,7 +875,7 @@ def dynasty_to_report_structure(current_dynasty):
 
 def collect_path_from_formatted_dynasty(node_name, current_dynasty): 
     for nn in current_dynasty: 
-        if nn['name'].lower() == node_name.lower(): 
+        if nn['name'].lower().strip() == node_name.lower().strip(): 
             return nn['path']
         
 def split_node_for_info(path):
