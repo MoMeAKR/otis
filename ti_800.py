@@ -246,13 +246,16 @@ def save_config(config, p ):
     with open(p, 'w') as f:
         json.dump(config, f, indent = 4)
 
-def format_dynasty(dynasty):
+def format_dynasty(dynasty, keep_path = False):
     # recursive function that scrolls through the dynasty (path, children) and each path is rewritten as os.path.basename(path)
     # and the children are recursively formatted
-    formatted = {"path": os.path.basename(dynasty['path']).split('.')[0], "children": []}
+    p = os.path.basename(dynasty['path']).split('.')[0]
+    formatted = {"path": dynasty['path'] if keep_path else p,
+                  "name":  tmp_key_formatting(p.split('_')[-2], up_ = True) if '_' in p else p, 
+                  "children": []}
     if len(dynasty['children']) > 0:
         for child in dynasty['children']:
-            formatted['children'].append(format_dynasty(child))
+            formatted['children'].append(format_dynasty(child, keep_path=keep_path))
 
     return formatted
 
@@ -384,23 +387,23 @@ def make_graph(config_path=None, **kwargs):
     mome.init_obsidian_vault(config['interactive_graph_path'], exists_ok=False)
 
     structure = {
-    "operation topic": ['overview',
-        {'Limitations of our previous perspective and what is wrong with other methods': [
-                "Focus on local problems instead of systemic solutions",
-                "Automated processing (of unstructured data)",
+    "Operation Topic": ['Overview',
+        {'Limitations Of Our Previous Perspective And What Is Wrong With Other Methods': [
+                "Focus On Local Problems Instead Of Systemic Solutions",
+                "Automated Processing Of Unstructured data)",
                 "Knowledge Management"
         ]
         },
-        "High-level vision of what we did"
+        "High-level Vision Of What We Did"
     ],
-    "technical justification": [
-        "test"
+    "Technical Justification": [
+        "Test"
     ],
-    "what we actually did": [
-        "test"
+    "What We Actually Did": [
+        "Test"
     ],
-    "conclusion": [
-        "test"
+    "Conclusion": [
+        "Test"
     ]
     }
 
@@ -557,6 +560,7 @@ def compile(config_path=None, **kwargs):
     
 
     # RUNNING THE ACTUAL COMPILATION
+    print('You forgot to uncomment' *20)
     compilation_results = json.load(open('tmp.json'))
     # compilation_results = {}
     # for i, c in enumerate(to_compile): 
@@ -725,13 +729,16 @@ def get_focus_node(config, targets = ['Section structure', 'Control section']):
     
     return result
 
-def tmp_key_formatting(s):
+def tmp_key_formatting(s, up_ = False):
     result = []
     for char in s:
         if char.isupper():
             if result:  # Avoid adding a space at the beginning
                 result.append(' ')
-            result.append(char.lower())
+            if up_:
+                result.append(char)
+            else: 
+                result.append(char.lower())
         else:
             result.append(char)
     return ''.join(result)
@@ -777,23 +784,110 @@ def structure_propagation(config_path = None, **kwargs):
     focus_node = get_focus_node(config)
     hierarchy = collect_hierarchy_to_focus_node(config)
     
+    
     # collect the initial contents (first level) from the report structure 
     next_level_structure = find_next_level_structure(config['report_structure'], hierarchy)
     
-    input(next_level_structure)
-    # DO NOT USE THE SECTION STRUCTURE BECAUSE THE USER MIGHT HAVE MODIFIED IT ! USE THE REPORT STRUCTURE FROM CONFIG['REPORT_STRUCTURE']
     if next_level_structure != focus_node['structure']['subs_titles']: # if the user has updated something 
-        # TODO 1 are there remaining nodes or has the user changed everything ? 
+         
+        # TODO based on the focus_node['structure']['subs_titles'], figure out how the downstream names must change for the already existing nodes (all existing nodes after those potentially added by the user will undergo a name change)
+        to_change = [] # list of nodes to change (all nodes that are in next_level_structure but not aligned with focus_node['structure']['subs_titles'])
+        to_add= []
+        for i in range(len(focus_node['structure']['subs_titles'])):
+            if focus_node['structure']['subs_titles'][i] in next_level_structure:
+                if next_level_structure.index(focus_node['structure']['subs_titles'][i]) != i:
+                    to_change.append({'node' : focus_node['structure']['subs_titles'][i],
+                                      'initial_index': next_level_structure.index(focus_node['structure']['subs_titles'][i]), 
+                                      'current_index': i}) 
+            else: 
+                to_add.append({'node': focus_node['structure']['subs_titles'][i], 
+                               'current_index': i})
+        to_remove = [{"node": n, "current_index" : i} for i, n in enumerate(next_level_structure) if n not in focus_node['structure']['subs_titles']]        
+        # to_add = [n for n in focus_node['structure']['subs_titles'] if n not in next_level_structure]
+        current_dynasty = format_dynasty((mome.collect_dynasty_paths(focus_node['path'], include_root=True, preserve_hierarchy=True)), keep_path= True)
 
-        # TODO 2 based on the user provided structure, figure out how the downstream names must change for the already existing nodes
 
-        # TODO 3 delete and reproduce the nodes under the correct names (for those that already existed)
+        # UPDATE EXISTING NODES         
+        for node in to_change: 
 
-        # TODO 4 update the necessary structures 
+            current_node_path = collect_path_from_formatted_dynasty(node['node'], current_dynasty['children'])
+            lvl, part, name, hash = split_node_for_info(current_node_path)
+            new_name = f"lvl{lvl}_part{node['current_index']}_{name}_{hash}"
+            # ideally, we should also change children names but that would imply first changing leaves and then bringing information back up to ensure links stay valid
 
-        # TODO 5 create the new node(s)
-        pass
+            # mome.obsidian_rename_node(current_node_path, new_name)            
+            current_dynasty['children'][node['initial_index']]['path'] = os.path.join(os.path.dirname(current_node_path), f"{new_name}.md")
+
+        # Prepare missing nodes creation --> nodes should be added in 'pour' so that changes in the template can be handled 
+        for node in to_add:
+            current_contents = get_default_section_dict()
+            current_control_center= get_control_center(focus_node['path'])
+            current_control_center = momeutils.insert_key_at_idx(current_control_center, 
+                                                                 node['current_index'], 
+                                                                 node['node'], 
+                                                                 _value= current_contents)
+            
+            # mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(current_control_center))
+            add_lvl = 1 + int(os.path.basename(focus_node['path']).split('_')[0].replace('lvl',''))
+            current_hash = mome.get_short_hash(os.path.basename(focus_node['path']).split('.')[0], 15)
+            current_dynasty['children'].insert(node['current_index'], 
+                                               {'path': os.path.join(os.path.dirname(focus_node['path']), f"lvl{add_lvl}_part{node['current_index']}_{node['node'].title().replace(' ', '')}_{current_hash}.md"), 
+                                                'children': []})
+        # Remove nodes
+        for node in to_remove:
+            # node_path = collect_path_from_formatted_dynasty(node, current_dynasty['children'])
+            # clean_dynasty(node_path, include_root=True)
+            # also, to remove from control center 
+            current_control_center= get_control_center(focus_node['path'])
+            current_control_center = current_control_center.pop(node['node'])
+
+            # mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(current_control_center))
+            current_dynasty['children'].pop(node['current_index'])
+
+        # SAVING THE FINAL REPORT STRUCTURE 
+        report_structure= config['report_structure']
         
+        current_dynasty_dict = dynasty_to_report_structure(current_dynasty)
+        formatted_hierarchy = [tmp_key_formatting(h).title() for h in hierarchy[1:]]
+        input(formatted_hierarchy)
+        momeutils.update_nested_dict(report_structure, formatted_hierarchy, current_dynasty_dict)
+        momeutils.dj(report_structure)
+        
+def dynasty_to_report_structure(current_dynasty): 
+    # recursive function returns a report structure (aka nested dicts with lists) from the dict with path, name, children
+    report_structure = {}
+
+    for node in current_dynasty['children']:
+
+        node_name= tmp_key_formatting(split_node_for_info(node['path'])[-2]).title()
+        if node['children']:
+            # If the node has children, recursively convert them
+            report_structure[node_name] = [dynasty_to_report_structure(node)]
+        else:
+            # If the node has no children, it's a leaf node
+            report_structure[node_name] = []
+
+    return report_structure
+
+
+def collect_path_from_formatted_dynasty(node_name, current_dynasty): 
+    for nn in current_dynasty: 
+        if nn['name'].lower() == node_name.lower(): 
+            return nn['path']
+        
+def split_node_for_info(path):
+
+    p = os.path.basename(path).split('.')[0]
+    if '_' in p: 
+        c = p.split('_')
+        lvl = int(c[0].replace('lvl', ''))
+        part = int(c[1].replace('part', ''))
+        name = c[2]
+        hash = c[3]
+        return lvl, part, name, hash 
+    else: 
+        return 0,0,"",p
+    
 
 
 def node_expansion_colab(config_path = None, **kwargs): 
