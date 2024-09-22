@@ -501,18 +501,22 @@ def check_children_node_existence(focus_node_contents):
     for i,k in enumerate(control_center.keys()): 
         node_name = f"lvl{lvl+1}_part{i}_{k.replace(' ', '')}_{focus_node_hash}"
         node_path = os.path.join(os.path.dirname(focus_node_contents['path']), node_name + ".md")
-
+        
+        add_children_paragraph = False 
+        
         if not os.path.exists(node_path):
             if control_center[k]['template'].strip() == "default": 
-                new_control_center = setup_control_center([[k, control_center[k]['template']]])
+                new_control_center = setup_control_center([["To Fill", control_center[k]['template']]])
                 new_section_structure = setup_section_structure(initial_contents = "Empty", subs_titles = ['To Fill'])
                 node_contents = {"Control center": momeutils.j_deco(new_control_center), 
                                  "Section structure": momeutils.j_deco(new_section_structure), 
                                  "Results": ""} 
                 tags = ["sub_"*(lvl+1) + "section"]
+
+                add_children_paragraph = True 
             else:
                 new_control_center = initiate_control_center()
-                node_contents = {"Control center": new_control_center, 
+                node_contents = {"Control center": momeutils.j_deco(new_control_center), 
                                  "Results": ""}
                 tags = ['results']
 
@@ -528,6 +532,24 @@ def check_children_node_existence(focus_node_contents):
             # Since the node is added, assume it is user validated --> Add it to links 
             mome.add_link_at_position(focus_node_contents['path'], node_name , i)
 
+            # IF THE NODE IS A SECTION (HIERARCHY) NODE, 
+            # WE AUTOMATICALLY CREATE A PLACEHOLDER CHILD TO ENSURE CORRECT DOWNSTREAM USAGE OF STRUCTURE
+            if add_children_paragraph: 
+                section_hash = mome.get_short_hash(node_name, 15)
+                leaf_contents = {
+                    "Control center": momeutils.j_deco(initiate_control_center()),
+                    "Results": ""
+                }
+                mome.add_node_to_graph(
+                    graph_folder=os.path.dirname(node_path),
+                    contents=leaf_contents,
+                    parent_path=node_path,
+                    tags=['results'],
+                    name_override=f"lvl{lvl+2}_part0_{new_section_structure['subs_titles'][0]}_{section_hash}",
+                    use_hash=False
+                )
+
+
     
 def pour_info(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -541,8 +563,6 @@ def pour_info(config_path=None, **kwargs):
     control_center = focus_node['control']#momeutils.parse_json(mome.get_node_section(focus_node_path, "Control center"))
     # Ensuring node existence 
     check_children_node_existence(focus_node)
-
-    return 
     
     full_hierarchy = format_dynasty(mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
                                                 , include_root = True, preserve_hierarchy = True))
@@ -812,6 +832,7 @@ def find_next_level_structure(report_structure, hierarchy):
                     # print('Found {}'.format(str_v))
                     # print('Structure:\n{}'.format(next_level_structure))
                     break                   
+    
 
     children = []
     if isinstance(next_level_structure, dict):
@@ -824,21 +845,29 @@ def find_next_level_structure(report_structure, hierarchy):
         else: 
             raise TypeError('Unrecognized type {} for next level structure {}'.format(type(c), c))  
     return children
-        
+
+def subs_titles_syntax_check(focus_node_contents):
+    """
+    Currently, only ensures that the subs_titles are in title case
+    """
+    focus_node_contents['structure']['subs_titles'] = [s.title() for s in focus_node_contents['structure']['subs_titles']]
+    mome.update_section(focus_node_contents['path'], 'Section structure', momeutils.j_deco(focus_node_contents['structure']))
+
 
 def structure_propagation(config_path = None, **kwargs): 
     config= load_config(config_path, **kwargs)
     focus_node = get_focus_node(config)
     hierarchy = collect_hierarchy_to_focus_node(config)
     
-    
+    subs_titles_syntax_check(focus_node)  
+
     # collect the initial contents (first level) from the report structure 
     next_level_structure = find_next_level_structure(config['report_structure'], hierarchy)
-    
+
     if next_level_structure != focus_node['structure']['subs_titles']: # if the user has updated something 
          
-        # TODO based on the focus_node['structure']['subs_titles'], figure out how the downstream names must change for the already existing nodes (all existing nodes after those potentially added by the user will undergo a name change)
-        to_change = [] # list of nodes to change (all nodes that are in next_level_structure but not aligned with focus_node['structure']['subs_titles'])
+        # Based on the focus_node['structure']['subs_titles'], figure out how the downstream names must change for the already existing nodes (all existing nodes after those potentially added by the user will undergo a name change)
+        to_change = [] 
         to_add= []
         for i in range(len(focus_node['structure']['subs_titles'])):
             if focus_node['structure']['subs_titles'][i] in next_level_structure:
@@ -895,7 +924,8 @@ def structure_propagation(config_path = None, **kwargs):
             # Updating links --> Adding the link too early introduces problems when parsing the hierarchy
             # mome.add_link_at_position(focus_node['path'], current_node_name , node['current_index'])
 
-
+        # momeutils.dj(to_remove)
+        # momeutils.dj(current_dynasty['children'])
         # Remove nodes
         for node in to_remove:
             node_path = collect_path_from_formatted_dynasty(node['node'], current_dynasty['children'])
@@ -906,7 +936,11 @@ def structure_propagation(config_path = None, **kwargs):
             current_control_center.pop(node['node'])
 
             mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(current_control_center))
-            current_dynasty['children'].pop(node['current_index'])
+            # current_dynasty['children'].pop(node['current_index'])
+
+            # Actually removing from the dynasty requires some gymnastics because the initial indices may be affected by previous operations
+            node_to_remove = [n for n in current_dynasty['children'] if n['path'] == node_path][0]
+            current_dynasty['children'].remove(node_to_remove)
 
             # And finally, pop from links 
             mome.remove_links(focus_node['path'], [momeutils.bn(node_path)]) 
@@ -944,7 +978,7 @@ def dynasty_to_report_structure(current_dynasty):
 
 
 def collect_path_from_formatted_dynasty(node_name, current_dynasty): 
-    print(json.dumps(current_dynasty, indent=4))
+    # print(json.dumps(current_dynasty, indent=4))
     # momeutils.uinput("{}".format(json.dumps(current_dynasty, indent =4)))
     for nn in current_dynasty: 
         # momeutils.crline(nn['name'])
