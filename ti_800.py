@@ -491,7 +491,7 @@ def collect_hierarchy_to_children(config, target_node_path):
     return hierarchy
 
 
-def check_children_node_existence(focus_node_contents): 
+def check_children_node_existence(config, focus_node_contents): 
 
     control_center = focus_node_contents['control']
     lvl, part, name, hash_ = split_node_for_info(focus_node_contents['path'])
@@ -540,14 +540,31 @@ def check_children_node_existence(focus_node_contents):
                     "Control center": momeutils.j_deco(initiate_control_center()),
                     "Results": ""
                 }
+                p_name = f"lvl{lvl+2}_part0_{new_section_structure['subs_titles'][0]}_{section_hash}"
                 mome.add_node_to_graph(
                     graph_folder=os.path.dirname(node_path),
                     contents=leaf_contents,
                     parent_path=node_path,
                     tags=['results'],
-                    name_override=f"lvl{lvl+2}_part0_{new_section_structure['subs_titles'][0]}_{section_hash}",
+                    name_override=p_name,
                     use_hash=False
                 )
+
+                current_dynasty = format_dynasty((mome.collect_dynasty_paths(focus_node_contents['path'], include_root=True, preserve_hierarchy=True)), keep_path= True)
+                node_index = [i for i, c in enumerate(current_dynasty['children']) if c['path'] == node_path][0]
+                current_dynasty['children'][node_index] = {"path": node_path, "children": [{"path": os.path.join(os.path.dirname(node_path), p_name + ".md"), "children": []}]}
+                config['report_structure'] = update_report_structure(config, current_dynasty, focus_node_contents['path'])
+
+
+def update_children_node_state(config, focus_node_contents):
+    """
+    For each children, checks if the template matches 
+    If there are changes, 
+        * Removes the dynasty, 
+        * Adds the relevant node (ideally, node contents should be somehow kept )
+        * Updates the config report structure accordingly
+    """
+    return 
 
 
     
@@ -561,8 +578,11 @@ def pour_info(config_path=None, **kwargs):
     hierarchy = collect_hierarchy_to_focus_node(config)
     section_structure = focus_node['structure']#momeutils.parse_json(mome.get_node_section(focus_node_path, "Section structure"))
     control_center = focus_node['control']#momeutils.parse_json(mome.get_node_section(focus_node_path, "Control center"))
-    # Ensuring node existence 
-    check_children_node_existence(focus_node)
+    
+    
+    # Ensuring node existence and managing report_structure
+    check_children_node_existence(config, focus_node)
+    update_children_node_state(config, focus_node)
     
     full_hierarchy = format_dynasty(mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
                                                 , include_root = True, preserve_hierarchy = True))
@@ -949,16 +969,25 @@ def structure_propagation(config_path = None, **kwargs):
         
 
         # SAVING THE FINAL REPORT STRUCTURE 
-        report_structure= config['report_structure']
-        
-        current_dynasty_dict = dynasty_to_report_structure(current_dynasty)
-        formatted_hierarchy = [tmp_key_formatting(h).title() for h in hierarchy[1:]]
-        # momeutils.dj(formatted_hierarchy)
-        momeutils.update_nested_dict(report_structure, formatted_hierarchy, current_dynasty_dict)
-        # momeutils.dj(report_structure)
-        # input('o k ? ')
-        config['report_structure'] = report_structure
+        config['report_structure'] = update_report_structure(config, current_dynasty, focus_node['path'])
+        # report_structure= config['report_structure']
+        # momeutils.dj(current_dynasty)
+        # current_dynasty_dict = dynasty_to_report_structure(current_dynasty)
+        # momeutils.dj(current_dynasty_dict)
+        # formatted_hierarchy = [tmp_key_formatting(h).title() for h in hierarchy[1:]]
+        # # momeutils.dj(formatted_hierarchy)
+        # momeutils.update_nested_dict(report_structure, formatted_hierarchy, current_dynasty_dict)
+        # # momeutils.dj(report_structure)
+        # # input('o k ? ')
+        # config['report_structure'] = report_structure
         save_config(config, config_path)
+
+def update_report_structure(config, current_dynasty, focus_node_path):
+    report_structure = config['report_structure']
+    current_dynasty_dict = dynasty_to_report_structure(current_dynasty)
+    formatted_hierarchy = [tmp_key_formatting(h).title() for h in collect_hierarchy_to_focus_node(config)[1:]]
+    momeutils.update_nested_dict(report_structure, formatted_hierarchy, current_dynasty_dict)
+    return report_structure
         
 def dynasty_to_report_structure(current_dynasty):
     report_structure = []
