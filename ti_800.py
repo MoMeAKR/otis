@@ -1,4 +1,4 @@
-
+import copy 
 import os
 import json
 import momeutils
@@ -540,7 +540,7 @@ def check_children_node_existence(config, focus_node_contents):
                     "Control center": momeutils.j_deco(initiate_control_center()),
                     "Results": ""
                 }
-                p_name = f"lvl{lvl+2}_part0_{new_section_structure['subs_titles'][0]}_{section_hash}"
+                p_name = f"lvl{lvl+2}_part0_{new_section_structure['subs_titles'][0].replace(' ', '')}_{section_hash}"
                 mome.add_node_to_graph(
                     graph_folder=os.path.dirname(node_path),
                     contents=leaf_contents,
@@ -573,13 +573,11 @@ def pour_info(config_path=None, **kwargs):
 
     focus_node = get_focus_node(config)
     focus_node_path = focus_node['path']
-    # root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
-    # hierarchy = formatted_path_to_children(format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True)), config['focus_node'])
+
     hierarchy = collect_hierarchy_to_focus_node(config)
-    section_structure = focus_node['structure']#momeutils.parse_json(mome.get_node_section(focus_node_path, "Section structure"))
-    control_center = focus_node['control']#momeutils.parse_json(mome.get_node_section(focus_node_path, "Control center"))
-    
-    
+    section_structure = focus_node['structure']
+    control_center = focus_node['control']
+       
     # Ensuring node existence and managing report_structure
     check_children_node_existence(config, focus_node)
     update_children_node_state(config, focus_node)
@@ -878,6 +876,7 @@ def structure_propagation(config_path = None, **kwargs):
     config= load_config(config_path, **kwargs)
     focus_node = get_focus_node(config)
     hierarchy = collect_hierarchy_to_focus_node(config)
+
     
     subs_titles_syntax_check(focus_node)  
 
@@ -948,6 +947,7 @@ def structure_propagation(config_path = None, **kwargs):
         # momeutils.dj(current_dynasty['children'])
         # Remove nodes
         for node in to_remove:
+            print(node['node'], list(current_control_center.keys()), node['node'] in list(current_control_center.keys()))
             node_path = collect_path_from_formatted_dynasty(node['node'], current_dynasty['children'])
 
             clean_dynasty(node_path, include_root=True)
@@ -966,10 +966,12 @@ def structure_propagation(config_path = None, **kwargs):
             mome.remove_links(focus_node['path'], [momeutils.bn(node_path)]) 
 
 
-        
+        momeutils.dj(current_dynasty) 
+        current_dynasty_copy = copy.deepcopy(current_dynasty)
 
         # SAVING THE FINAL REPORT STRUCTURE 
-        config['report_structure'] = update_report_structure(config, current_dynasty, focus_node['path'])
+        config['report_structure'] = update_report_structure(config, current_dynasty_copy, focus_node['path'])
+        momeutils.dj(config['report_structure'])
         # report_structure= config['report_structure']
         # momeutils.dj(current_dynasty)
         # current_dynasty_dict = dynasty_to_report_structure(current_dynasty)
@@ -984,8 +986,10 @@ def structure_propagation(config_path = None, **kwargs):
 
 def update_report_structure(config, current_dynasty, focus_node_path):
     report_structure = config['report_structure']
+   
     current_dynasty_dict = dynasty_to_report_structure(current_dynasty)
-    formatted_hierarchy = [tmp_key_formatting(h).title() for h in collect_hierarchy_to_focus_node(config)[1:]]
+    formatted_hierarchy = [tmp_key_formatting(h).title().replace('  ', ' ') for h in collect_hierarchy_to_focus_node(config)[1:]]
+    
     momeutils.update_nested_dict(report_structure, formatted_hierarchy, current_dynasty_dict)
     return report_structure
         
