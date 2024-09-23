@@ -211,7 +211,9 @@ def init_config_file(config_path):
         "last_nodes_added": [],
         "user_instruction" : None, 
         "results_path": None, 
-        "report_path": os.path.join(os.path.dirname(__file__), 'reports')
+        "report_path": os.path.join(os.path.dirname(__file__), 'reports'),
+        "control_key": None, 
+        "control_contents": ""
     }
 
     with open(config_path, 'w') as f:
@@ -392,7 +394,7 @@ def make_graph(config_path=None, **kwargs):
     "Operation Topic": ['Overview',
         {'Limitations Of Our Previous Perspective And What Is Wrong With Other Methods': [
                 "Focus On Local Problems Instead Of Systemic Solutions",
-                "Automated Processing Of Unstructured data)",
+                "Automated Processing Of unstructured data",
                 "Knowledge Management"
         ]
         },
@@ -471,15 +473,22 @@ def propagate(config_path=None, **kwargs):
                                 momeutils.j_deco(link_control_center))
         elif control_center[k]['template'] == "default": 
             # insert in initial contents
+
+            momeutils.crline('Updating section structure in {}'.format(l))
             section_structure = momeutils.parse_json(mome.get_node_section(link_path, "Section structure"))
             section_structure = update_existing_structure(section_structure, 
                                                           initial_contents = control_center[k]['user_instruction'])
             mome.update_section(link_path,
                                 "Section structure", 
                                 momeutils.j_deco(section_structure))
-            leftovers = pour_info(config_path, focus_node = l)
-            non_filled[config['focus_node']] = leftovers
-            non_filled[l] = propagate(config_path, focus_node = l)
+            if not section_structure['subs_titles'] == ['To Fill']:
+                leftovers = pour_info(config_path, focus_node = l)
+                non_filled[config['focus_node']] = leftovers
+
+                momeutils.dj({"leftovers": leftovers, 
+                            "non_filled": non_filled})
+
+                non_filled[l] = propagate(config_path, focus_node = l)
     return non_filled
 
 def collect_hierarchy_to_focus_node(config):
@@ -675,6 +684,29 @@ def pour_info(config_path=None, **kwargs):
 
     save_config(config, config_path)
     return leftovers
+
+
+def enhance_control_key(config_path=None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    control_key = config['control_key']
+    control_contents = config['control_contents']
+    
+    focus_node = get_focus_node(config)
+    section_structure = focus_node['structure'] 
+    control_center = focus_node['control']
+
+
+    if not control_key.strip().lower() in [c.lower().strip() for c in control_center.keys()]:
+        raise ValueError(f"Control key {control_key} not found in control contents")
+    key_id = [k for k in control_center.keys() if k.lower().strip() == control_key.lower().strip()][0]
+    p = "Initial complete content before split: {}\n\nTarget section: {}\n\nInitial content assigned to section: {}\n\nUser request: {}\n\nEnhance the Initial content assigned to section taking into account the global context and with particular attention to the user request.".format(section_structure['initial_contents'],
+                                                     control_key, control_center[key_id], control_contents)
+    out = momeutils.basic_task(p, model = "g4o")
+    control_center[key_id]['user_instruction'] = out
+    mome.update_section(focus_node['path'], "Control center", momeutils.j_deco(control_center))
+    save_config(config, config_path)   
+
+
 
 def more_contents(config_path = None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -1305,38 +1337,17 @@ if __name__ == "__main__":
     make_graph(config_path)
     # updating root
     
-    config = json.load(open(config_path))
+    # config = json.load(open(config_path))
 
-    section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"))
-    section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
-    
-    # UPDATING ROOT 
-    mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
-
-    # UPDATING OPERATION TOPIC 
-    section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"))
+    # section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"))
     # section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
-    section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'], subs_titles = rationales['different_subs_titles_in_operationtopic'])
-    mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
-
-
-
-
-
-    # # compile(os.path.join(os.path.dirname(__file__), "config_ti.json"))
-    # x = """In this initial experiment, we wanted to try and train a model using a synthetic dataset that featured no spurrious correlation. The goal was to have the model learn the correct relationships and then use those on real data to see transfer. While we had some hope, it's definitely not trivial, we checked many models but didn't get convincing results, suggesting we're still missing something. And then, we actually looked at activation maps to see which features were supposed to trigger the model"""
-    # section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl1_part2_Results_56e0e704b60fcee.md"))    
-    # section_structure = update_existing_structure(section_structure, initial_contents = x)
-    # input(section_structure)
-    # mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl1_part2_Results_56e0e704b60fcee.md"), momeutils.j_deco(section_structure), "Section structure")
-    # mome.set_active_node(os.path.join(os.path.dirname(__file__), "sir_interactive_graph"), 
-    #                     "lvl1_part2_Results_56e0e704b60fcee.md") 
-    # input(' move to lvl1_part2_Results_56e0e704b60fcee')
-    # pour_info(os.path.join(os.path.dirname(__file__), "config_ti.json"))
-    # propagate(os.path.join(os.path.dirname(__file__), "config_ti.json"))
-
-    # lvl1_part0_Summary_223e136940ee14f
-
-
-    # operation_topic = """Deep Learning Models: We're using advanced models like Convolutional Neural Networks (CNNs) and Recurrent Neural Networks (RNNs) to classify spectrograms, which are visual representations of signal frequencies over time.\nWhy It’s Better: First, automated feature extraction means no need for manual feature design; the models learn directly from raw data. Second, higher accuracy is achieved because these models capture complex patterns, leading to better performance, especially in critical areas like speech recognition and medical diagnostics. Third, scalability allows them to handle large and complex datasets efficiently. Fourth, noise robustness ensures they work well even with noisy data. Lastly, transfer learning means pre-trained models can be adapted to new tasks quickly, saving time and data"""
     
+    # # UPDATING ROOT 
+    # mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
+
+    # # UPDATING OPERATION TOPIC 
+    # section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"))
+    # # section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
+    # section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'], subs_titles = rationales['different_subs_titles_in_operationtopic'])
+    # mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
+
