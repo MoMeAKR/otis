@@ -491,6 +491,44 @@ def collect_hierarchy_to_children(config, target_node_path):
     return hierarchy
 
 
+def add_default_hierarchical_node(focus_node_contents, node_name, parent_path = None): 
+    control_center = focus_node_contents['control']
+    lvl, part, name, hash_ = split_node_for_info(focus_node_contents['path'])
+    
+    
+    current_node_key = tmp_key_formatting(node_name.split('_')[-2], up_ = True)
+    new_control_center = setup_control_center([["To Fill", control_center[current_node_key]['template']]])
+    new_section_structure = setup_section_structure(initial_contents = "Empty", subs_titles = ['To Fill'])
+    node_contents = {"Control center": momeutils.j_deco(new_control_center), 
+                    "Section structure": momeutils.j_deco(new_section_structure), 
+                    "Results": ""} 
+    tags = ["sub_"*(lvl+1) + "section"]
+
+    return mome.add_node_to_graph(
+        graph_folder=os.path.dirname(focus_node_contents['path']),
+        contents=node_contents,
+        parent_path=parent_path, # putting it to None and adding it later otherwise it gets added at the end 
+        tags = tags, 
+        name_override= node_name,
+        use_hash=False
+    )
+
+def add_default_result_node(focus_node_contents, node_name, parent_path = None): 
+    new_control_center = initiate_control_center()
+    node_contents = {"Control center": momeutils.j_deco(new_control_center), 
+                    "Results": ""}
+    tags = ['results']
+
+    return mome.add_node_to_graph(
+        graph_folder=os.path.dirname(focus_node_contents['path']),
+        contents=node_contents,
+        parent_path=parent_path,
+        tags=tags,
+        name_override=node_name,
+        use_hash=False
+    )
+
+
 def check_children_node_existence(config, focus_node_contents): 
 
     control_center = focus_node_contents['control']
@@ -506,28 +544,30 @@ def check_children_node_existence(config, focus_node_contents):
         
         if not os.path.exists(node_path):
             if control_center[k]['template'].strip() == "default": 
-                new_control_center = setup_control_center([["To Fill", control_center[k]['template']]])
-                new_section_structure = setup_section_structure(initial_contents = "Empty", subs_titles = ['To Fill'])
-                node_contents = {"Control center": momeutils.j_deco(new_control_center), 
-                                 "Section structure": momeutils.j_deco(new_section_structure), 
-                                 "Results": ""} 
-                tags = ["sub_"*(lvl+1) + "section"]
-
+                # new_control_center = setup_control_center([["To Fill", control_center[k]['template']]])
+                # new_section_structure = setup_section_structure(initial_contents = "Empty", subs_titles = ['To Fill'])
+                # node_contents = {"Control center": momeutils.j_deco(new_control_center), 
+                #                  "Section structure": momeutils.j_deco(new_section_structure), 
+                #                  "Results": ""} 
+                # tags = ["sub_"*(lvl+1) + "section"]
+                added_node = add_default_hierarchical_node(focus_node_contents, node_name)
                 add_children_paragraph = True 
             else:
-                new_control_center = initiate_control_center()
-                node_contents = {"Control center": momeutils.j_deco(new_control_center), 
-                                 "Results": ""}
-                tags = ['results']
+                
+                added_node = add_default_result_node(focus_node_contents, node_name)
+            #     new_control_center = initiate_control_center()
+            #     node_contents = {"Control center": momeutils.j_deco(new_control_center), 
+            #                      "Results": ""}
+            #     tags = ['results']
 
-            mome.add_node_to_graph(
-                graph_folder=os.path.dirname(focus_node_contents['path']),
-                contents=node_contents,
-                parent_path=None, # putting it to None and adding it later otherwise it gets added at the end 
-                tags = tags, 
-                name_override=node_name,
-                use_hash=False
-            )
+            # mome.add_node_to_graph(
+            #     graph_folder=os.path.dirname(focus_node_contents['path']),
+            #     contents=node_contents,
+            #     parent_path=None, # putting it to None and adding it later otherwise it gets added at the end 
+            #     tags = tags, 
+            #     name_override=node_name,
+            #     use_hash=False
+            # )
 
             # Since the node is added, assume it is user validated --> Add it to links 
             mome.add_link_at_position(focus_node_contents['path'], node_name , i)
@@ -535,20 +575,22 @@ def check_children_node_existence(config, focus_node_contents):
             # IF THE NODE IS A SECTION (HIERARCHY) NODE, 
             # WE AUTOMATICALLY CREATE A PLACEHOLDER CHILD TO ENSURE CORRECT DOWNSTREAM USAGE OF STRUCTURE
             if add_children_paragraph: 
+                new_section_structure = get_section_structure(added_node)
                 section_hash = mome.get_short_hash(node_name, 15)
-                leaf_contents = {
-                    "Control center": momeutils.j_deco(initiate_control_center()),
-                    "Results": ""
-                }
+                # leaf_contents = {
+                #     "Control center": momeutils.j_deco(initiate_control_center()),
+                #     "Results": ""
+                # }
                 p_name = f"lvl{lvl+2}_part0_{new_section_structure['subs_titles'][0].replace(' ', '')}_{section_hash}"
-                mome.add_node_to_graph(
-                    graph_folder=os.path.dirname(node_path),
-                    contents=leaf_contents,
-                    parent_path=node_path,
-                    tags=['results'],
-                    name_override=p_name,
-                    use_hash=False
-                )
+                # mome.add_node_to_graph(
+                #     graph_folder=os.path.dirname(node_path),
+                #     contents=leaf_contents,
+                #     parent_path=node_path,
+                #     tags=['results'],
+                #     name_override=p_name,
+                #     use_hash=False
+                # )
+                add_default_result_node(focus_node_contents, p_name, parent_path = added_node)
 
                 current_dynasty = format_dynasty((mome.collect_dynasty_paths(focus_node_contents['path'], include_root=True, preserve_hierarchy=True)), keep_path= True)
                 node_index = [i for i, c in enumerate(current_dynasty['children']) if c['path'] == node_path][0]
@@ -564,6 +606,29 @@ def update_children_node_state(config, focus_node_contents):
         * Adds the relevant node (ideally, node contents should be somehow kept )
         * Updates the config report structure accordingly
     """
+
+    control_center = focus_node_contents['control']
+    lvl, part, name, hash_ = split_node_for_info(focus_node_contents['path'])
+    focus_node_hash = mome.get_short_hash(momeutils.bn(focus_node_contents['path']), 15)
+    for i, k in enumerate(control_center.keys()): 
+        # IS THERE DISCREPANCY BETWEEN TEMPLATE AND ACTUAL NODE TYPE
+        # VARIOUS WAYS TO CHECK -> FIRST APPROXIMATION USING TEMPLATE SECTIONS 
+        user_request = control_center[k]['template'].strip().lower()
+        node_path = os.path.join(os.path.dirname(focus_node_contents['path']), f"lvl{lvl+1}_part{i}_{k.replace(' ', '')}_{focus_node_hash}.md")
+        node_type = 'default' if mome.check_section(node_path, "Section structure") else 'direct'
+        
+        # ADDING THE NODE 
+        if node_type != user_request: 
+            clean_dynasty(node_path, include_root = True)
+            if user_request == "direct": 
+                child_node_name = f"lvl{lvl+1}_part{i}_{k.replace(' ', '')}_{focus_node_hash}"  
+                add_default_result_node(focus_node_contents, child_node_name)
+            elif user_request == "default":
+                child_node_name = f"lvl{lvl+1}_part{i}_{k.replace(' ', '')}_{focus_node_hash}"
+                add_default_hierarchical_node(focus_node_contents, child_node_name)
+            else: 
+                raise ValueError(f'Unrecognized template type {user_request}')
+
     return 
 
 
@@ -947,7 +1012,7 @@ def structure_propagation(config_path = None, **kwargs):
         # momeutils.dj(current_dynasty['children'])
         # Remove nodes
         for node in to_remove:
-            print(node['node'], list(current_control_center.keys()), node['node'] in list(current_control_center.keys()))
+            # print(node['node'], list(current_control_center.keys()), node['node'] in list(current_control_center.keys()))
             node_path = collect_path_from_formatted_dynasty(node['node'], current_dynasty['children'])
 
             clean_dynasty(node_path, include_root=True)
@@ -965,13 +1030,11 @@ def structure_propagation(config_path = None, **kwargs):
             # And finally, pop from links 
             mome.remove_links(focus_node['path'], [momeutils.bn(node_path)]) 
 
-
-        momeutils.dj(current_dynasty) 
         current_dynasty_copy = copy.deepcopy(current_dynasty)
 
         # SAVING THE FINAL REPORT STRUCTURE 
         config['report_structure'] = update_report_structure(config, current_dynasty_copy, focus_node['path'])
-        momeutils.dj(config['report_structure'])
+        # momeutils.dj(config['report_structure'])
         # report_structure= config['report_structure']
         # momeutils.dj(current_dynasty)
         # current_dynasty_dict = dynasty_to_report_structure(current_dynasty)
@@ -989,7 +1052,7 @@ def update_report_structure(config, current_dynasty, focus_node_path):
    
     current_dynasty_dict = dynasty_to_report_structure(current_dynasty)
     formatted_hierarchy = [tmp_key_formatting(h).title().replace('  ', ' ') for h in collect_hierarchy_to_focus_node(config)[1:]]
-    
+
     momeutils.update_nested_dict(report_structure, formatted_hierarchy, current_dynasty_dict)
     return report_structure
         
@@ -1240,7 +1303,7 @@ if __name__ == "__main__":
     rationale_path = os.path.join(os.path.dirname(__file__), "contents_ainimals.json")
     rationales = json.load(open(rationale_path))
     make_graph(config_path)
-    # updating root4
+    # updating root
     
     config = json.load(open(config_path))
 
@@ -1252,7 +1315,8 @@ if __name__ == "__main__":
 
     # UPDATING OPERATION TOPIC 
     section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"))
-    section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
+    # section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
+    section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'], subs_titles = rationales['different_subs_titles_in_operationtopic'])
     mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
 
 
