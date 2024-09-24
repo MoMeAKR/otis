@@ -217,7 +217,12 @@ def init_config_file(config_path):
         "inadequate_contents": None, 
         "non_filled": None, 
         "paragraph_parameter": None, 
-        "paragraph_parameter_content": None
+        "paragraph_parameter_content": None,
+        "report_details": {
+            "author": "MoMe3600", 
+            "title": "T-800: From the Future",
+            "template": os.path.join(os.path.dirname(__file__), '.latex_template.txt')
+        } 
     }
 
     with open(config_path, 'w') as f:
@@ -446,9 +451,41 @@ def get_control_center(node):
 def get_section_structure(node):
     return momeutils.parse_json(mome.get_node_section(node, "Section structure"))
 
+def model_suggestion_to_user_instruction(config_path = None, **kwargs): 
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    control_center = focus_node['control']
+    structure = focus_node['structure']
+    control_key = config['control_key']
+    ui = config['user_instruction']
+
+    key_id = check_matching_key(control_center, control_key)
+
+    model_suggestion = "\n* ".join([""] + control_center[key_id]['model_suggestion'])
+    p = "In the process of preparing section contents for a report, the initially provided contents didn't match the target section '{}' and some suggestions were provided, which we now want to rewrite and format to convey the high-level ideas for that section. \rInitially provided text: '{}'\n\nSuggestions: \n{}\n\nUser additional instruction: {}\n\nConsidering the broader context and the (optional) user directive, rewrite the suggestions".format(key_id, 
+                                                                                                                                                                                                                                                                                                                                                                structure['initial_contents'], 
+                                                                                                                                                                                                                                                                                                                                                                model_suggestion, 
+                                                                                                                                                                                                                                                                                                                                                                config['user_instruction']
+                                                                                                                                                                                                                                                                                                                                                                )
+    input(p)
+    out = momeutils.basic_task(p, model = 'g4o')
+    control_center[key_id]['user_instruction'] = out
+
+    # Updating 
+    mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(control_center))
+    save_config(config, config_path)
+
+
+
 
 def propagate(config_path = None, **kwargs): 
 
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+
+    # THOSE ENABLE LAST MINUTE CHANGES TO THE STRUCTURE 
+    check_children_node_existence(config, focus_node)
+    update_children_node_state(config, focus_node)
 
     inadequate_contents, non_filled = do_propagate(config_path, **kwargs)
     config = load_config(config_path, **kwargs)
@@ -576,11 +613,11 @@ def check_children_node_existence(config, focus_node_contents):
         if not os.path.exists(node_path):
             if control_center[k]['template'].strip() == "default": 
               
-                input('about to hierarchical add {}'.format(node_name))
+                # input('about to hierarchical add {}'.format(node_name))
                 added_node = add_default_hierarchical_node(focus_node_contents, node_name)
                 add_children_paragraph = True 
             else:
-                input('about to result add {}'.format(node_name))
+                # input('about to result add {}'.format(node_name))
                 added_node = add_default_result_node(focus_node_contents, node_name)
          
 
@@ -595,7 +632,7 @@ def check_children_node_existence(config, focus_node_contents):
         
                 p_name = f"lvl{lvl+2}_part0_{new_section_structure['subs_titles'][0].replace(' ', '')}_{section_hash}"
             
-                input('FOllowing hierachical add, adding result node {}'.format(p_name))
+                # input('Following hierachical add, adding result node {}'.format(p_name))
                 add_default_result_node(focus_node_contents, p_name, parent_path = added_node)
 
                 current_dynasty = format_dynasty((mome.collect_dynasty_paths(focus_node_contents['path'], include_root=True, preserve_hierarchy=True)), keep_path= True)
@@ -702,6 +739,12 @@ def push_specific_parameter(config_path= None, **kwargs):
         print('Considering node: {}'.format(c))
         result = momeutils.basic_task(p, model = 'g4o')
 
+def check_matching_key(control_center, control_key):
+
+    matching = [k for k in control_center.keys() if k.lower().strip().startswith(control_key.lower().strip())]
+    if len(matching) == 0: 
+        raise ValueError(f"Control key {control_key} not found in control contents")
+    return matching[0]
 
 def enhance_control_key(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -713,9 +756,20 @@ def enhance_control_key(config_path=None, **kwargs):
     control_center = focus_node['control']
 
 
-    if not control_key.strip().lower() in [c.lower().strip() for c in control_center.keys()]:
-        raise ValueError(f"Control key {control_key} not found in control contents")
-    key_id = [k for k in control_center.keys() if k.lower().strip() == control_key.lower().strip()][0]
+    # Find the key that starts with the control_key
+    key_id = check_matching_key(control_center, control_key)
+    # matching_keys = [k for k in control_center.keys() if k.lower().strip().startswith(control_key.lower().strip())]
+    
+    # if not matching_keys:
+    #     raise ValueError(f"Control key {control_key} not found in control contents")
+    
+    # key_id = matching_keys[0]
+
+    input(key_id)
+
+    # if not control_key.strip().lower() in [c.lower().strip() for c in control_center.keys()]:
+    #     raise ValueError(f"Control key {control_key} not found in control contents")
+    # key_id = [k for k in control_center.keys() if k.lower().strip() == control_key.lower().strip()][0]
     p = "Initial complete content before split: {}\n\nTarget section: {}\n\nInitial content assigned to section: {}\n\nUser request: {}\n\nEnhance the Initial content assigned to section taking into account the global context and with particular attention to the user request.".format(section_structure['initial_contents'],
                                                      control_key, control_center[key_id], control_contents)
     out = momeutils.basic_task(p, model = "g4o")
@@ -766,7 +820,7 @@ def compile(config_path=None, **kwargs):
     
 
     # RUNNING THE ACTUAL COMPILATION
-    print('You forgot to uncomment' *20)
+    # print('You forgot to uncomment' *20)
     compilation_results = json.load(open('tmp.json'))
     # compilation_results = {}
     # for i, c in enumerate(to_compile): 
@@ -781,6 +835,9 @@ def compile(config_path=None, **kwargs):
     #     compilation_results[result_key]['lvl'] = lvl
     #     compilation_results[result_key]['part'] = part
     #     compilation_results[result_key]['name'] = result_key
+
+    # with open('tmp.json', 'w') as f:    
+    #     json.dump(compilation_results, f, indent = 4)
 
     update_compilation_results(config, compilation_results)
     # input(' ok ')
@@ -813,8 +870,13 @@ def produce_latex(config):
             latex_content.append(structure)
 
     traverse_structure(contents, 0)
+    latex_result = open(config['report_details']['template']).read()
+    latex_result = latex_result.replace('MY_TITLE', config['report_details']['title']).replace('MY_AUTHOR', config['report_details']['author']).replace('MY_CONTENTS', "\n\n".join(latex_content))
     with open(os.path.join(config['report_path'], 'report.tex'), 'w') as f:
-        f.write("\n\n".join(latex_content))
+        f.write(latex_result)
+
+    # RUN COMPILATION 
+    subprocess.run(['pdflatex','-interaction=nonstopmode' ,'-output-directory', config['report_path'], os.path.join(config['report_path'], 'report.tex')])
 
 
 def update_compilation_results(config, compilation_results):
@@ -853,13 +915,13 @@ def update_compilation_results(config, compilation_results):
         print('\n\nLooking for node with lvl {} and part {} - Name {}'.format(lvl, part, name))
         # Find the corresponding node in the structure
         hierarchy = find_node(config['report_structure'], lvl, part, current_lvl=0, current_part=0)
-        
+
         if hierarchy:
             # Navigate to the correct place in the results
             current_level = existing_results['results']
             for h in hierarchy[:-1]:
                 current_level = current_level[h]
-            
+
             if isinstance(current_level, dict):
                 if isinstance(current_level[hierarchy[-1]], list):
                     current_level[hierarchy[-1]][part] = {name: result['result']}
@@ -1112,12 +1174,10 @@ def hierarchical_rename(current_node_path, new_name):
         keep_path=True
     )
 
-    momeutils.crline('Working on {}'.format(current_node_path))    
     new_hash = mome.get_short_hash(new_name, 15)
 
     # Update the current node
     update_node_and_links(current_node_path, new_name, new_hash)
-    momeutils.uinput('Updated')
     # Recursively update children
     for child in current_dynasty['children']:
         child_path = child['path']
@@ -1134,7 +1194,6 @@ def update_node_and_links(node_path, new_name, new_hash):
         lvl, part, name, hash = split_node_for_info(link)
         new_links_names.append(f"lvl{lvl}_part{part}_{name}_{new_hash}")
 
-    print('New links: {}'.format(new_links_names))
     # Update links and rename node
     mome.update_link_section(node_path, new_links_names)
     mome.obsidian_rename_node(node_path, new_name)
