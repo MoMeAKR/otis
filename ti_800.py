@@ -213,7 +213,11 @@ def init_config_file(config_path):
         "results_path": None, 
         "report_path": os.path.join(os.path.dirname(__file__), 'reports'),
         "control_key": None, 
-        "control_contents": ""
+        "control_contents": "", 
+        "inadequate_contents": None, 
+        "non_filled": None, 
+        "paragraph_parameter": None, 
+        "paragraph_parameter_content": None
     }
 
     with open(config_path, 'w') as f:
@@ -229,7 +233,7 @@ def load_config(config_path, **kwargs):
     nb_updates = 0 
     for k,v in kwargs.items():  
         if k in config.keys():
-            print(k, v)
+            # print(k, v)
             nb_updates += 1
             config[k] = v
 
@@ -443,12 +447,23 @@ def get_section_structure(node):
     return momeutils.parse_json(mome.get_node_section(node, "Section structure"))
 
 
-def propagate(config_path=None, **kwargs):
+def propagate(config_path = None, **kwargs): 
+
+
+    inadequate_contents, non_filled = do_propagate(config_path, **kwargs)
+    config = load_config(config_path, **kwargs)
+    momeutils.crline("{}".format(json.dumps({"inadequate_contents": inadequate_contents, "non_filled": non_filled}, indent = 4)))
+    config['inadequate_contents'] = inadequate_contents
+    config['non_filled'] = non_filled
+    save_config(config, config_path)
+
+def do_propagate(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
     full_dynasty_formatted = format_dynasty(mome.collect_dynasty_paths(os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md"), include_root=True, preserve_hierarchy=True))
     focus_node_path = os.path.join(config['interactive_graph_path'], config['focus_node'] + ".md")
     control_center = get_control_center(focus_node_path)
     links = mome.get_node_links(focus_node_path)
+    inadequate = {}
     non_filled = {}
     for i, (k,l) in enumerate(zip(control_center.keys(), links)):
         link_path = os.path.join(config['interactive_graph_path'], l + ".md")
@@ -483,13 +498,20 @@ def propagate(config_path=None, **kwargs):
                                 momeutils.j_deco(section_structure))
             if not section_structure['subs_titles'] == ['To Fill']:
                 leftovers = pour_info(config_path, focus_node = l)
-                non_filled[config['focus_node']] = leftovers
-
-                momeutils.dj({"leftovers": leftovers, 
-                            "non_filled": non_filled})
-
-                non_filled[l] = propagate(config_path, focus_node = l)
-    return non_filled
+                # momeutils.dj({"Focus node": config['focus_node'], 
+                #               "L": l, 
+                #               "Leftovers": leftovers})
+                # inadequate[config['focus_node']] = leftovers
+                inadequate[l] = leftovers
+                # momeutils.dj({"leftovers": leftovers, 
+                #             "inadequate": inadequate})
+                # inadequate[l] = do_propagate(config_path, focus_node = l)
+                prop_results = do_propagate(config_path, focus_node = l)
+                inadequate[l] += prop_results[0]
+                non_filled[l] = prop_results[1]
+            else: 
+                non_filled[l] = 'to_fill'
+    return inadequate, non_filled
 
 def collect_hierarchy_to_focus_node(config):
     return collect_hierarchy_to_children(config, config['focus_node'])
@@ -553,30 +575,14 @@ def check_children_node_existence(config, focus_node_contents):
         
         if not os.path.exists(node_path):
             if control_center[k]['template'].strip() == "default": 
-                # new_control_center = setup_control_center([["To Fill", control_center[k]['template']]])
-                # new_section_structure = setup_section_structure(initial_contents = "Empty", subs_titles = ['To Fill'])
-                # node_contents = {"Control center": momeutils.j_deco(new_control_center), 
-                #                  "Section structure": momeutils.j_deco(new_section_structure), 
-                #                  "Results": ""} 
-                # tags = ["sub_"*(lvl+1) + "section"]
+              
+                input('about to hierarchical add {}'.format(node_name))
                 added_node = add_default_hierarchical_node(focus_node_contents, node_name)
                 add_children_paragraph = True 
             else:
-                
+                input('about to result add {}'.format(node_name))
                 added_node = add_default_result_node(focus_node_contents, node_name)
-            #     new_control_center = initiate_control_center()
-            #     node_contents = {"Control center": momeutils.j_deco(new_control_center), 
-            #                      "Results": ""}
-            #     tags = ['results']
-
-            # mome.add_node_to_graph(
-            #     graph_folder=os.path.dirname(focus_node_contents['path']),
-            #     contents=node_contents,
-            #     parent_path=None, # putting it to None and adding it later otherwise it gets added at the end 
-            #     tags = tags, 
-            #     name_override=node_name,
-            #     use_hash=False
-            # )
+         
 
             # Since the node is added, assume it is user validated --> Add it to links 
             mome.add_link_at_position(focus_node_contents['path'], node_name , i)
@@ -586,19 +592,10 @@ def check_children_node_existence(config, focus_node_contents):
             if add_children_paragraph: 
                 new_section_structure = get_section_structure(added_node)
                 section_hash = mome.get_short_hash(node_name, 15)
-                # leaf_contents = {
-                #     "Control center": momeutils.j_deco(initiate_control_center()),
-                #     "Results": ""
-                # }
+        
                 p_name = f"lvl{lvl+2}_part0_{new_section_structure['subs_titles'][0].replace(' ', '')}_{section_hash}"
-                # mome.add_node_to_graph(
-                #     graph_folder=os.path.dirname(node_path),
-                #     contents=leaf_contents,
-                #     parent_path=node_path,
-                #     tags=['results'],
-                #     name_override=p_name,
-                #     use_hash=False
-                # )
+            
+                input('FOllowing hierachical add, adding result node {}'.format(p_name))
                 add_default_result_node(focus_node_contents, p_name, parent_path = added_node)
 
                 current_dynasty = format_dynasty((mome.collect_dynasty_paths(focus_node_contents['path'], include_root=True, preserve_hierarchy=True)), keep_path= True)
@@ -685,6 +682,26 @@ def pour_info(config_path=None, **kwargs):
     save_config(config, config_path)
     return leftovers
 
+def push_specific_parameter(config_path= None, **kwargs): 
+    config= load_config(config_path, **kwargs)
+    param_key = config['paragraph_parameter']
+    param_content = config['paragraph_parameter_content']
+    focus_node = get_focus_node(config)
+
+    # collect all children leaf nodes 
+    if is_leaf(focus_node['path']):
+        target_children = [focus_node['path']]
+    else: 
+        
+        target_children = collect_all_compilable_children(focus_node_path=focus_node['path'])
+    for c in target_children: 
+        control_center = get_control_center(c)
+        p = "In the context of automated long-form text generation, we are looking to enhance the current leaf paragraph with a {}. The initial (fixed) context is described by the following parameters: \n{}\n\nFrom a high-level standpoint, overlooking multiple paragraph, the user has requested the following content to be included \n{}\n\nBased on the context, is the user provided input relevant or should it be kept for other places ? Answer with a short rationale and then conclude with an integer score from 0 to 10, (10 being perfect fit).".format(
+            param_key, json.dumps(control_center, indent = 4), "{} --> {}".format(param_key, param_content))
+        # input(p)
+        print('Considering node: {}'.format(c))
+        result = momeutils.basic_task(p, model = 'g4o')
+
 
 def enhance_control_key(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -729,15 +746,22 @@ def is_leaf(current_node, target_tag = "results"):
     tags= mome.get_file_tags(current_node)
     return target_tag in tags
 
+def collect_all_compilable_children(focus_node_path, target_tag = ["results"]):
+    node_dynasty = mome.collect_dynasty_paths(focus_node_path, include_root=False, preserve_hierarchy=False)
+    _, result_nodes = mome.collect_node_contents(os.path.dirname(focus_node_path), tags = target_tag, return_paths = True)
+    to_compile = [n for n in node_dynasty if n in result_nodes]
+    return to_compile
+
 def compile(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
     focus_node_path = os.path.join(config['interactive_graph_path'], config['focus_node'] + ".md")
     if is_leaf(focus_node_path): 
         to_compile = [focus_node_path]
     else: 
-        node_dynasty = mome.collect_dynasty_paths(focus_node_path, include_root=False, preserve_hierarchy=False)
-        _, result_nodes = mome.collect_node_contents(config['interactive_graph_path'], tags = ['results'], return_paths = True)
-        to_compile = [n for n in node_dynasty if n in result_nodes]
+        to_compile = collect_all_compilable_children(focus_node_path)
+        # node_dynasty = mome.collect_dynasty_paths(focus_node_path, include_root=False, preserve_hierarchy=False)
+        # _, result_nodes = mome.collect_node_contents(config['interactive_graph_path'], tags = ['results'], return_paths = True)
+        # to_compile = [n for n in node_dynasty if n in result_nodes]
     print("\n* ".join([''] + [os.path.basename(n).split('.')[0] for n in to_compile]))
     
 
@@ -1013,9 +1037,11 @@ def structure_propagation(config_path = None, **kwargs):
             lvl, part, name, hash = split_node_for_info(current_node_path)
             new_name = f"lvl{lvl}_part{node['current_index']}_{name}_{hash}"
             # ideally, we should also change children names but that would imply first changing leaves and then bringing information back up to ensure links stay valid
-            mome.obsidian_rename_node(current_node_path, new_name)            
-            current_dynasty['children'][node['initial_index']]['path'] = os.path.join(os.path.dirname(current_node_path), f"{new_name}.md")
+            # mome.obsidian_rename_node(current_node_path, new_name)   
+            hierarchical_rename(current_node_path, new_name)         
 
+            current_dynasty['children'][node['initial_index']]['path'] = os.path.join(os.path.dirname(current_node_path), f"{new_name}.md")
+            
             # update links in the focus node 
             mome.replace_link(focus_node['path'], momeutils.bn(current_node_path), new_name)
 
@@ -1078,6 +1104,66 @@ def structure_propagation(config_path = None, **kwargs):
         # # input('o k ? ')
         # config['report_structure'] = report_structure
         save_config(config, config_path)
+
+def hierarchical_rename(current_node_path, new_name):
+    # Collect the current dynasty paths
+    current_dynasty = format_dynasty(
+        mome.collect_dynasty_paths(current_node_path, include_root=True, preserve_hierarchy=True),
+        keep_path=True
+    )
+
+    momeutils.crline('Working on {}'.format(current_node_path))    
+    new_hash = mome.get_short_hash(new_name, 15)
+
+    # Update the current node
+    update_node_and_links(current_node_path, new_name, new_hash)
+    momeutils.uinput('Updated')
+    # Recursively update children
+    for child in current_dynasty['children']:
+        child_path = child['path']
+        lvl, part, name, hash = split_node_for_info(child_path)
+        new_child_name = f"lvl{lvl}_part{part}_{name}_{new_hash}"
+        hierarchical_rename(child_path, new_child_name)
+
+def update_node_and_links(node_path, new_name, new_hash):
+    # Get current links
+    current_links = mome.get_node_links(node_path)
+    new_links_names = []
+
+    for link in current_links:
+        lvl, part, name, hash = split_node_for_info(link)
+        new_links_names.append(f"lvl{lvl}_part{part}_{name}_{new_hash}")
+
+    print('New links: {}'.format(new_links_names))
+    # Update links and rename node
+    mome.update_link_section(node_path, new_links_names)
+    mome.obsidian_rename_node(node_path, new_name)
+
+
+# def hierarchical_rename(current_node_path, new_name):
+
+#     # Collect the current dynasty paths
+#     current_dynasty = format_dynasty(
+#         mome.collect_dynasty_paths(current_node_path, include_root=True, preserve_hierarchy=True),
+#         keep_path=True
+#     )
+#     print(json.dumps(current_dynasty, indent = 4))
+#     print(new_name, mome.get_short_hash(new_name, 15)) # this is the new name
+#     new_hash = mome.get_short_hash(new_name, 15)
+
+#     # =======================================
+#     # EXAMPLE FOR THE CURRENT NODE, THIS HAS TO BE DONE RECURSIVELY
+#     current_links = mome.get_node_links(current_node_path)
+#     new_links_names = []
+#     for link in current_links:
+#         lvl, part, name, hash = split_node_for_info(link)
+#         new_links_names.append(f"lvl{lvl}_part{part}_{name}_{new_hash}")
+
+#     # renaming 
+#     mome.update_link_section(current_node_path, new_links_names)
+#     mome.obsidian_rename_node(current_node_path, os.path.join(os.path.dirname(current_node_path), new_name + ".md"))
+        
+
 
 def update_report_structure(config, current_dynasty, focus_node_path):
     report_structure = config['report_structure']
@@ -1337,17 +1423,17 @@ if __name__ == "__main__":
     make_graph(config_path)
     # updating root
     
-    # config = json.load(open(config_path))
+    config = json.load(open(config_path))
 
-    # section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"))
-    # section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
+    section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"))
+    section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
     
-    # # UPDATING ROOT 
-    # mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
+    # UPDATING ROOT 
+    mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", config['current_hash'] + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
 
-    # # UPDATING OPERATION TOPIC 
-    # section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"))
-    # # section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
-    # section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'], subs_titles = rationales['different_subs_titles_in_operationtopic'])
-    # mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
+    # UPDATING OPERATION TOPIC 
+    section_structure = get_section_structure(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"))
+    # section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'])
+    section_structure = update_existing_structure(section_structure, initial_contents = rationales['rationale'], subs_titles = rationales['different_subs_titles_in_operationtopic'])
+    mome.update_section(os.path.join(os.path.dirname(__file__), "sir_interactive_graph", "lvl0_part0_OperationTopic_2cf24dba5fb0a30" + ".md"), "Section structure", momeutils.j_deco(section_structure)) 
 
