@@ -803,7 +803,6 @@ def check_missing_children(config_path = None, **kwargs):
                 current_dynasty = current_dynasty['children'][target_idx]
         # ====================================
 
-
         parent_controls = get_control_center(collected_path)
         parent_structure = get_section_structure(collected_path)
         print(parent_structure)
