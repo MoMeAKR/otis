@@ -1239,20 +1239,39 @@ def compile(config_path=None, **kwargs):
     # print('You forgot to uncomment'.upper()*20)
     # compilation_results = json.load(open('tmp.json'))
     compilation_results = {}
-    for i, c in enumerate(to_compile): 
 
-        # COMPILE RETURNS A DICT
-        current_result = compile_node(c)
-        # result_key = os.path.basename(c).split('.')[0].split('_')[-2]
-        # lvl = int(os.path.basename(c).split('.')[0].split('_')[0].replace('lvl', ''))
-        # part = int(os.path.basename(c).split('.')[0].split('_')[1].replace('part', ''))
+    # PARALLELIZING THE COMPILATION
+    func_arg_list = [
+        (compile_node, (c,)) for c in to_compile
+    ]
+    parallel_results = momeutils.mapper(func_arg_list)
+    
+    # AGREGATING RESULTS AGAIN 
+    for i,c in enumerate(to_compile):   
+        current_result = parallel_results[i]
         lvl, part, name, hash_ = split_node_for_info(c)
-        # ADDING A KEY TO KEEP TRACK OF THE LEVEL OF THE NODE (SECTION, SUBSECTION, SUBSUBSECTION...)
+        
         compilation_results[name] = current_result
+
         compilation_results[name]['lvl'] = lvl
         compilation_results[name]['part'] = part
         compilation_results[name]['name'] = name
-        compilation_results[name]['hash'] = hash_   
+        compilation_results[name]['hash'] = hash_
+
+    # for i, c in enumerate(to_compile): 
+
+    #     # COMPILE RETURNS A DICT
+    #     current_result = compile_node(c)
+    #     # result_key = os.path.basename(c).split('.')[0].split('_')[-2]
+    #     # lvl = int(os.path.basename(c).split('.')[0].split('_')[0].replace('lvl', ''))
+    #     # part = int(os.path.basename(c).split('.')[0].split('_')[1].replace('part', ''))
+    #     lvl, part, name, hash_ = split_node_for_info(c)
+    #     # ADDING A KEY TO KEEP TRACK OF THE LEVEL OF THE NODE (SECTION, SUBSECTION, SUBSUBSECTION...)
+    #     compilation_results[name] = current_result
+    #     compilation_results[name]['lvl'] = lvl
+    #     compilation_results[name]['part'] = part
+    #     compilation_results[name]['name'] = name
+    #     compilation_results[name]['hash'] = hash_   
 
     with open('tmp.json', 'w') as f:    
         json.dump(compilation_results, f, indent = 4)
