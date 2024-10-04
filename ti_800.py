@@ -1,14 +1,52 @@
 
-import momeutils
 import subprocess
-import re
 import inspect
+import glob
 import copy
+import shutil
+import re
+import momeutils
 import json
 import mome
 import os
-import shutil
-import glob
+
+
+def identify_missing_elements_for_consistency(initial_content = None, subsections = None, target_subsection = None, current_extracted_text = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are a text analysis expert assisting the user in identifying missing elements within a subsection of a larger text to ensure downstream consistency. You will be provided with the initial text, its subsections, a target subsection, and the currently extracted text for that subsection. Your task is to analyze these elements and determine what information is missing for the target subsection to ensure consistency. 
+    Specifically, you will receive:
+    - The initial piece of text.
+    - A list of subsections related to the initial content.
+    - The specific subsection that is the focus of the agent's analysis.
+    - The text currently extracted that outlines the target subsection.
+    You should return:
+    - The initial piece of text provided to the agent.
+    - A list of subsections related to the initial content.
+    - The specific subsection that is the focus of the agent's analysis.
+    - The text currently extracted that outlines the target subsection.
+    - The missing elements identified by the agent to ensure downstream consistency.
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    "consistency_elements" : "concise rationale emphasizing the needed elements for consistency, if any" // think specific names, ideas or acronyms that might be lost downstream 
+    
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Initial Content\n{}\n\n Subsections\n{}\n\n Target Subsection\n{}\n\n Current Extracted Text\n{}\n\nGiven the initial content, a list of subsections, the target subsection, and the current extracted text for that subsection, identify and return any missing elements necessary to ensure consistency.\n\n".format(icl_examples, initial_content, subsections, target_subsection, current_extracted_text)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["consistency_elements"]
 
 
 def outline_report(core_idea = None, current_structure = None, user_instruction = None): 
@@ -35,7 +73,7 @@ def outline_report(core_idea = None, current_structure = None, user_instruction 
     }} 
     ```
     """}, 
-        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Core Idea\n{}\n\nGiven a core idea for a report, generate a structured outline encompassing sections, subsections, and subsubsections, and return this structure under the key 'structure'.\n\n{}\n\n{}\n\nFormatting wise, Write Everything With Title, avoid non alphabetic characters and refrain from using acronyms".format(icl_examples, core_idea, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Core Idea\n{}\n\nGiven a core idea for a report, generate a structured outline encompassing sections, subsections, and subsubsections, and return this structure under the key 'structure'.\n\n{}\n\n{}\n\nFormatting wise, Write Everything With Title (Even Words Like 'In', 'And', 'Of' ... ), avoid non alphabetic characters and refrain from using acronyms (e.g:  write Artifical Intelligence instead of AI)".format(icl_examples, core_idea, 
                                                                                                                                                                                                                                                                                                                                    "Current structure: \n{}".format(json.dumps(current_structure, indent = 4)) if current_structure else "",
                                                                                                                                                                                                                                                                                                                                    "User instruction: \n{}".format(user_instruction) if user_instruction else "")}
     ]
@@ -193,7 +231,7 @@ Answer in a JSON format as follows:
     }} 
     ```
     """},
-        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n High-level layout\n{}\n\nUse the provided layout template to produce a well-structured and coherent text under the key 'contents'. To prevent formatting issues, use '\\n' in your answer to represent line breaks \n\n".format(icl_examples, "\n* ".join([''] + paragraph_template))}
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n High-level layout\n{}\n\nUse the provided layout template to produce a well-structured and coherent text under the key 'contents'. To prevent formatting issues, use '\\n' in your answer to represent line breaks \n\n. Everything must be written in **french**. Tout doit être rédigé en français.".format(icl_examples, "\n* ".join([''] + paragraph_template))}
     ]
 
     parseable = False
@@ -248,7 +286,7 @@ def simple_extract(sample_text = None, sections = None):
             {"role": "system", "content": """
 You are an expert annotator assisting the user in structuring text. You will be provided with a text and a list of sections (for an global perspective).  
 Your task is to identify and sum up how the root text could fill each target section, while being mindful of the broader context. If nothing matches, answer with 'null'
-Answer in a valid JSON format as follows:
+Answer in a **valid** JSON format as follows:
     ```json
     {{
 {sections}
@@ -263,7 +301,7 @@ Answer in a valid JSON format as follows:
     parseable = False
     while not parseable: 
         initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
-        print(initial_answer)
+        # print(initial_answer)
     momeutils.crprint(json.dumps(results, indent = 4))
     
     return  results
@@ -512,21 +550,21 @@ def reset_config(config_path = None):
 def define_structure(config, text_contents, user_instruction = None):
 
 
-    # current_structure = outline_report(text_contents)
-    # with open(config['tmp_structure_file'], 'w') as f:
-    #     json.dump(current_structure, f, indent = 4)
-    # momeutils.crline('{}'.format(json.dumps(current_structure, indent = 4)))
-    # subprocess.run(["code" ,'-n', config['tmp_structure_file']])
-    # done= False
-    # while not done: 
+    current_structure = outline_report(text_contents)
+    with open(config['tmp_structure_file'], 'w') as f:
+        json.dump(current_structure, f, indent = 4)
+    momeutils.crline('{}'.format(json.dumps(current_structure, indent = 4)))
+    subprocess.run(["code" ,'-n', config['tmp_structure_file']])
+    done= False
+    while not done: 
 
-    #     q = momeutils.uinput("Updates (done to finish)")
-    #     if q.lower().strip() == "done": 
-    #         break 
-    #     else: 
-    #         current_structure = outline_report(text_contents, current_structure = json.load(open(config['tmp_structure_file'])), user_instruction = q)
-    #         with open(config['tmp_structure_file'], 'w') as f:
-    #             json.dump(current_structure, f, indent = 4)
+        q = momeutils.uinput("Updates (done to finish)")
+        if q.lower().strip() == "done": 
+            break 
+        else: 
+            current_structure = outline_report(text_contents, current_structure = json.load(open(config['tmp_structure_file'])), user_instruction = q)
+            with open(config['tmp_structure_file'], 'w') as f:
+                json.dump(current_structure, f, indent = 4)
     current_structure = json.load(open(config['tmp_structure_file']))
     converted = run_structure_conversion(current_structure)
     return converted
@@ -969,6 +1007,7 @@ def check_missing_children(config_path = None, **kwargs):
     ))
 
     # # processing missing results
+    collected_parents = []
     for k in missing_results: 
         lvl, part, name, hash_ = split_node_for_info(k)
 
@@ -1008,12 +1047,13 @@ def check_missing_children(config_path = None, **kwargs):
                     target_idx = [i for i, c in enumerate(current_dynasty['children']) if c['name'] == pr][0]
                     current_dynasty = current_dynasty['children'][target_idx]
             # ====================================
-        input(collected_path)
+        collected_parents.append([momeutils.bn(collected_path), momeutils.bn(k)])
         parent_controls = get_control_center(collected_path)
         parent_structure = get_section_structure(collected_path)
 
         momeutils.crline('Figure out some helpful logic here' * 15)
-        
+    
+    momeutils.dj(collected_parents)
         # CAREFUL ! THERE IS A VULNERABILITY IN FIND_NODE --> NODES THAT DIFFER ONLY BY THE HASH CAN BE MIXED UP  
         # parent_contents = find_node_in_structure(config['report_structure'], lvl, part, tmp_key_formatting(name, up_= True).strip(), hash_)
         # input(parent_contents)
@@ -1096,18 +1136,12 @@ def pour_info(config_path=None, **kwargs):
         control_center[s]['user_instruction'] = results[k]
         
         if k in leftovers: 
-            # p = "Consider the following user-provided text: **{}**\n\nWe were trying to identify content for a section named {} and containing the following subsections {}. \n\nSpecifically, focus is on {}.Here is its positionning in the document hierarchy: \n{}\n\nIn the initial pass, it was deemed that the user-provided text did not contain relevant information to the target section. Based on your expert knowledge, suggest meaningful and insightful contents, topic or concepts that could enhance the current guidelines ? Your answer must go directly to the specifics (aka, directly provide your suggestions, avoid starting with unnecessary 'To enhance guidelines, blabla')".format(section_structure['initial_contents'], config['focus_node'].split('_')[-2], "\n*".join([''] + section_structure['subs_titles']), s, " ".join(["\n" + "\t" * i +"* " + h for i, h in enumerate(hierarchy)]))
-            # input(p)
-            # control_center[s]['model_suggestion'] = momeutils.basic_task(p, model = 'g4o')
+            # TODO add something to help enhancing that specific key 
             control_center[s]['model_suggestion'] = "Some model suggestion"
         # Add additional details here
         else: 
             # Adding consistency details to maintain coherence 
-            # p = "Consider the following user-provided initial contents: \n\n{} \n\nThose initial contents are split between the following sections: {}\n\nAfter a split stage, the current target section {} named **{}** got filled with the following: \n{}\n\nGiven that this section will have downstream children and that the goal is to produce an efficient and coherent report, which details (if any) from the **initial contents** should be subtly included to avoid missing to maintain consistency and coherence ? Answer with a short rationale listing those needed details if there are any , otherwise answer with an empty string.".format(section_structure['initial_contents'], section_structure['subs_titles'],
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        #  i, s, control_center[s]['user_instruction'])
-            out = "hello"
-
-            # out = momeutils.basic_task(p, model = 'g4o')
+            out = identify_missing_elements_for_consistency(section_structure['initial_contents'], section_structure['subs_titles'], k, control_center[s]['user_instruction'])
             control_center[s]['consistency_elements'] = out
     
     # updating sections 
@@ -1175,7 +1209,8 @@ def more_contents(config_path = None, **kwargs):
         subs = get_section_structure(focus_node_path)['subs_titles']
         p = "As an efficient AI writing assistant, you are to provide insightful complementary ideas to the user based on the following information. \n Section location in the document hierarchy : \n{}\n Focus section is {}\n Subsections in this section are: \n{}\n\n The user has provided the following initial text: \n{}\n\nFinally, the user has also provided the following instruction: {}\n\nBased on this global view, rewrite/expand/enhance the initial provided text taking into account the additional instruction.".format("\n".join(["\t" + h for h in hierarchy]), config['focus_node'].split('_')[-2], "\n".join(["\t* " + s for s in subs]), section_structure['initial_contents'], config['user_instruction'])
         out = momeutils.basic_task(p, model = 'g4o')
-        valid = momeutils.u_valid()
+        # valid = momeutils.u_valid()
+        valid = True
         if valid: 
             section_structure = update_existing_structure(section_structure, initial_contents = out)  
             mome.update_section(focus_node_path, "Section structure", momeutils.j_deco(section_structure))
@@ -1199,9 +1234,6 @@ def compile(config_path=None, **kwargs):
         to_compile = [focus_node_path]
     else: 
         to_compile = collect_all_compilable_children(focus_node_path)
-
-    # print("\n* ".join([''] + [os.path.basename(n).split('.')[0] for n in to_compile]))
-
 
     # RUNNING THE ACTUAL COMPILATION
     # print('You forgot to uncomment'.upper()*20)
