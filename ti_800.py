@@ -1,14 +1,52 @@
 
-import json
-import glob
-import os
-import copy
-import mome
-import shutil
 import momeutils
-import inspect
-import re
 import subprocess
+import re
+import inspect
+import copy
+import json
+import mome
+import os
+import shutil
+import glob
+
+
+def outline_report(core_idea = None, current_structure = None, user_instruction = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    messages = [
+            {"role": "system", "content": """
+    You are an expert report writer assisting the user in structuring a report given its core idea. Concretely, you are expected to propose a hierarchical outline of the report given a short text describing its core idea.
+    Answer in a JSON format as follows:
+    ```json
+    {{
+    
+        "structure" : [
+            ["Name section 0", 
+             ["Name subsection 0.0", "Name subsection 0.1", 
+                                    ["Name subsubsection 0.1.0", "Name subsubsection 0.1.1"]
+             "Name subsection 0.2"],
+            ["Name section 1", 
+             ["Name subsection 1.0",  
+                ["Name subsubsection 1.0.0", "Name subsubsection 1.0.1"], 
+             ... // add more items as needed...
+        ]
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Core Idea\n{}\n\nGiven a core idea for a report, generate a structured outline encompassing sections, subsections, and subsubsections, and return this structure under the key 'structure'.\n\n{}\n\n{}\n\nFormatting wise, Write Everything With Title, avoid non alphabetic characters and refrain from using acronyms".format(icl_examples, core_idea, 
+                                                                                                                                                                                                                                                                                                                                   "Current structure: \n{}".format(json.dumps(current_structure, indent = 4)) if current_structure else "",
+                                                                                                                                                                                                                                                                                                                                   "User instruction: \n{}".format(user_instruction) if user_instruction else "")}
+    ]
+
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["structure"]
 
 def generate_section_titles(text = None, num_sections = None): 
     
@@ -210,7 +248,7 @@ def simple_extract(sample_text = None, sections = None):
             {"role": "system", "content": """
 You are an expert annotator assisting the user in structuring text. You will be provided with a text and a list of sections (for an global perspective).  
 Your task is to identify and sum up how the root text could fill each target section, while being mindful of the broader context. If nothing matches, answer with 'null'
-Answer in a JSON format as follows:
+Answer in a valid JSON format as follows:
     ```json
     {{
 {sections}
@@ -221,7 +259,11 @@ Answer in a JSON format as follows:
         {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Root text (serving as a knowledge repository)\n{}\n\n Sections\n{}\n\nGiven the root text and a list of sections, sum up some elements from the root text that could serve as justifications or supporting information for our section of interest (feel free to rephase instead of simply copy pasting things out). Try and be accurate and mindful of other sections, that is, not all content must be used and if nothing relates to the current elements, please use null.\n\n".format(icl_examples, sample_text, sections)}
     ]
 
-    results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    # momeutils.dj(messages)
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+        print(initial_answer)
     momeutils.crprint(json.dumps(results, indent = 4))
     
     return  results
@@ -232,9 +274,9 @@ def init_config_file(config_path):
         "base_knowledge_path": os.path.join(os.path.dirname(__file__), 'sample_ainimals.txt'),
         "current_hash": None,
         "interactive_graph_path": os.path.join(os.path.dirname(__file__), 'sir_interactive_graph'),
-        "report_structure": {
-        
-        },
+        "tmp_structure_file": os.path.join(os.path.dirname(__file__), '.tmp_structure.json'),
+        "tmp_init_text": None,
+        "report_structure": None,
         "focus_node": None, 
         "last_nodes_added": [],
         "user_instruction" : None, 
@@ -257,6 +299,8 @@ def init_config_file(config_path):
 
     with open(config_path, 'w') as f:
         json.dump(config, f, indent = 4)
+
+    return config
 
 
 def load_config(config_path, **kwargs):
@@ -327,10 +371,33 @@ def path_to_children(dynasty, target_children):
 def format_section_title(s):
     return "".join([w.capitalize() for w in s.replace('_', ' ').lower().strip().split()])
 
-def gf_all(v, show_structure = False):
+def gf_all(structure, show_structure = False):
+
     if show_structure: 
-        return [[gf(vv), 'paragraph' if isinstance(vv, str) else 'section'] for vv in v]  
-    return [gf(vv) for vv in v]
+        result = []
+        if isinstance(structure, dict):
+            for k in structure.keys(): 
+                
+                # result.append([k, 'paragraph' if all(isinstance(vv, str) for vv in structure[k]) else 'section'])
+                result.append([k, 'section'])
+        elif isinstance(structure, list): 
+            result = [[gf(vv), 'paragraph' if isinstance(vv, str) else 'section'] for vv in structure]
+        # else: 
+            # result.append([k, ])
+            # result.append([gf(vv), 'paragraph' if all(isinstance(vv, str) for vv in structure[k]) else 'section'])
+        return result
+    # else:
+    #     if isinstance(structure, dict): 
+    #         # momeutils.dj({'Dict': structure})
+    #     elif isinstance(structure, list): 
+    #         print([gf(v) for v in structure])
+    #         # momeutils.dj({'List': structure})
+    #     else:   
+    #         # momeutils.dj({'Other': structure})
+        # return [[gf(v[vv]), 'paragraph' if isinstance(vv, str) else 'section'] for vv in v]  
+    # return [gf(structure) for k in structure.keys()]
+    return [gf(v) for v in structure]
+    # return gf(structure)
 
 def gf(v): 
     """
@@ -348,13 +415,16 @@ def gf(v):
 
 
 
-def create_nodes_recursively(root_hash, graph_folder, structure, parent_path=None, level=0, part=0, parent_hash=None):
-    for key, value in structure.items():
+def create_nodes_recursively(root_hash, graph_folder, structure, parent_path=None, level=0, part_add=0, parent_hash=None):
+    for n_idx, (key, value) in enumerate(structure.items()):
+
         if isinstance(value, list):
             # Create the current node
 
-            node_name = f"lvl{level}_part{part}_{format_section_title(key)}_{parent_hash}" if parent_hash else f"{parent_hash}"
+            node_name = f"lvl{level}_part{n_idx + part_add}_{format_section_title(key)}_{parent_hash}" if parent_hash else f"{parent_hash}"
             current_hash = mome.get_short_hash(node_name, 15)
+
+            momeutils.crline('For node {} -- Value : {}'.format(node_name, value))
 
             node_contents = {
                 # "Base contents": momeutils.j_deco(setup_base_contents_from_hls(value)),
@@ -366,7 +436,10 @@ def create_nodes_recursively(root_hash, graph_folder, structure, parent_path=Non
             # Update control center with the structure
 
             # Update base contents 
-
+            # if level == 0: 
+                # print('Creating node {}'.format(node_name))
+                # momeutils.dj(value)
+                # momeutils.dj(node_contents)
             created_node_path = mome.add_node_to_graph(
                 graph_folder=graph_folder,
                 contents=node_contents,
@@ -375,12 +448,16 @@ def create_nodes_recursively(root_hash, graph_folder, structure, parent_path=Non
                 name_override=node_name,
                 use_hash=False
             )
+
+            # momeutils.uinput('Added {}'.format(node_name))
             
 
             # THESE ARE FOR AUTOMATICALLY FILLING THE PARAGRAPH CONTROLS 
             section_population = []
-            section_depopulation = gf_all(value)[1:]#[gf(v) for v in value][1:]
-
+            # input(value)
+            # section_depopulation = gf_all(value)1:]#[gf(v) for v in value][1:]
+            section_depopulation = gf_all(value)[1:]
+            # input(section_depopulation)
             # Recursively create child nodes
             for i, item in enumerate(value):
                 
@@ -431,6 +508,95 @@ def reset_config(config_path = None):
         os.remove(config_path)
     init_config_file(config_path)
 
+
+def define_structure(config, text_contents, user_instruction = None):
+
+
+    # current_structure = outline_report(text_contents)
+    # with open(config['tmp_structure_file'], 'w') as f:
+    #     json.dump(current_structure, f, indent = 4)
+    # momeutils.crline('{}'.format(json.dumps(current_structure, indent = 4)))
+    # subprocess.run(["code" ,'-n', config['tmp_structure_file']])
+    # done= False
+    # while not done: 
+
+    #     q = momeutils.uinput("Updates (done to finish)")
+    #     if q.lower().strip() == "done": 
+    #         break 
+    #     else: 
+    #         current_structure = outline_report(text_contents, current_structure = json.load(open(config['tmp_structure_file'])), user_instruction = q)
+    #         with open(config['tmp_structure_file'], 'w') as f:
+    #             json.dump(current_structure, f, indent = 4)
+    current_structure = json.load(open(config['tmp_structure_file']))
+    converted = run_structure_conversion(current_structure)
+    return converted
+
+def sanitize_str_title(s):
+    return s.replace(' AI ', ' Artficial Intelligence ').title()
+
+def run_structure_conversion(structure): 
+    """
+    Converts and cleans structured representation of a report structure from nested list to dict and list
+    """
+
+    converted = []
+    
+    for c in convert_structure(structure):
+        if len(c) > 1:
+            r = {sanitize_str_title(list(c[0].keys())[0]): [c[0][list(c[0].keys())[0]]][0] + [c[i] for i in range(1, len(c))][0]}
+        else:
+            r = {sanitize_str_title(list(c[0].keys())[0]): [c[i][list(c[i].keys())[0]] for i in range(len(c))][0]}
+        
+        converted.append(r)
+    converted = {list(c.keys())[0]: c[list(c.keys())[0]] for c in converted}
+    # momeutils.dj(converted)
+    return converted
+
+def convert_structure(data):
+    # Determine if the current level should be a list or a dictionary
+    if all(isinstance(i, str) for i in data):
+        return [sanitize_str_title(d) for d in data]  # If all elements are strings, return as a flat list
+
+    result = []
+    i = 0
+    while i < len(data):
+        item = data[i]
+        if isinstance(item, str):
+            if i + 1 < len(data) and isinstance(data[i + 1], list):
+                # Create a dictionary entry if the next item is a list
+                result.append({item: convert_structure(data[i + 1])})
+                i += 1  # Skip the next item since it's already processed
+            else:
+                # Add the string directly to the result list
+                result.append(item)
+        else:
+            # Handle case where item is a list (shouldn't occur in this structure)
+            result.append(convert_structure(item))
+        i += 1
+
+    return result
+
+
+
+
+
+def initialize_graph_from_text(config_path=None, **kwargs):
+    config = init_config_file(config_path)
+
+    text_contents = open(kwargs.get('text_contents', None)).read()
+    config['tmp_init_text'] = kwargs.get('text_contents', None)
+
+    if text_contents is None:
+        raise ValueError('Empty text contents')
+    
+    structure = define_structure(config, text_contents, kwargs.get('user_instruction', None))
+
+    config['report_structure'] = structure
+    save_config(config, config_path)
+
+    make_graph(config_path, **kwargs)
+    return 
+
 def make_graph(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
     mome.init_obsidian_vault(config['interactive_graph_path'], exists_ok=False)
@@ -439,37 +605,54 @@ def make_graph(config_path=None, **kwargs):
     if os.path.exists(config['results_path']):
         shutil.rmtree(config['results_path'])
 
-    # TMP STRUCTURE (OR STARTING POINT)
-    structure = {
-    "Operation Topic": ['Overview',
-        {'Limitations Of Our Previous Perspective And What Is Wrong With Other Methods': [
-                "Focus On Local Problems Instead Of Systemic Solutions",
-                "Automated Processing Of Unstructured Data",
-                "Knowledge Management"
+    if config['report_structure'] is None:  
+        # TMP STRUCTURE (OR STARTING POINT)
+        structure = {
+        "Operation Topic": ['Overview',
+            {'Limitations Of Our Previous Perspective And What Is Wrong With Other Methods': [
+                    "Focus On Local Problems Instead Of Systemic Solutions",
+                    "Automated Processing Of Unstructured Data",
+                    "Knowledge Management"
+            ]
+            },
+            "What We Did"
+        ],
+        "Technical Justification": [
+            "Test"
+        ],
+        "What We Actually Did": [
+            "Test"
+        ],
+        "Conclusion": [
+            "Test"
         ]
-        },
-        "What We Did"
-    ],
-    "Technical Justification": [
-        "Test"
-    ],
-    "What We Actually Did": [
-        "Test"
-    ],
-    "Conclusion": [
-        "Test"
-    ]
-    }
+        }
 
-    config['report_structure'] = structure
+        config['report_structure'] = structure
+    else: 
+        structure = config['report_structure']
 
-    # Root id
-    base_hash = mome.get_short_hash("hello", 15)  # TMP
+    
     
     # Create root node
     root_contents = {"Control center": momeutils.j_deco(setup_control_center_from_hls(structure)),
                      "Section structure": momeutils.j_deco(setup_section_structure_from_hls(structure)),
                      "Results": ""}
+    
+
+    # Root id
+    base_hash = mome.get_short_hash("hello", 15)  # TMP
+
+    if config['tmp_init_text'] is not None:
+        base_text = open(config['tmp_init_text']).read()
+        
+        current_root_structure = momeutils.parse_json(root_contents['Section structure'])
+        current_root_structure['initial_contents'] = base_text
+        root_contents['Section structure'] = momeutils.j_deco(current_root_structure)
+
+        base_hash = mome.get_short_hash(base_text, 15)
+    
+
     root_node_path = mome.add_node_to_graph(
         graph_folder=config['interactive_graph_path'],
         contents=root_contents,
@@ -479,11 +662,12 @@ def make_graph(config_path=None, **kwargs):
         use_hash=False
     )
 
+
     config['current_hash'] = base_hash
     config['results_path'] = os.path.join(os.path.dirname(config['report_path']), "results", f"results_{base_hash}.json")
 
     # Create nodes recursively
-    create_nodes_recursively(config['current_hash'], config['interactive_graph_path'], structure, root_node_path, level=0, part=0, parent_hash=base_hash)
+    create_nodes_recursively(config['current_hash'], config['interactive_graph_path'], structure, root_node_path, level=0, part_add=0, parent_hash=mome.get_short_hash(base_hash, 15))
     save_config(config, config_path)
 
 def get_control_center(node): 
@@ -654,12 +838,17 @@ def add_default_result_node(focus_node_contents, node_name, parent_path = None):
     )
 
 
+
 def check_children_node_existence(config): 
 
     focus_node_contents = get_focus_node(config)
     control_center = focus_node_contents['control']
     lvl, part, name, hash_ = split_node_for_info(focus_node_contents['path'])
     focus_node_hash = mome.get_short_hash(momeutils.bn(focus_node_contents['path']), 15)
+    if is_root(config, focus_node_contents['path']):
+        lvl = -1
+    
+    
 
     # print(momeutils.bn(focus_node_contents['path']))
     # print(lvl, part, name, hash_)
@@ -670,7 +859,7 @@ def check_children_node_existence(config):
         node_path = os.path.join(os.path.dirname(focus_node_contents['path']), node_name + ".md")
 
         add_children_paragraph = False 
-        # print(node_name)
+        # momeutils.crline(node_name)
         if not os.path.exists(node_path):
             # input('missing {}'.format(node_name))
             if control_center[k]['template'].strip() == "default": 
@@ -715,6 +904,9 @@ def update_children_node_state(config):
     focus_node_contents = get_focus_node(config)
     control_center = focus_node_contents['control']
     lvl, part, name, hash_ = split_node_for_info(focus_node_contents['path'])
+    if is_root(config, focus_node_contents['path']):
+        lvl = -1
+
     focus_node_hash = mome.get_short_hash(momeutils.bn(focus_node_contents['path']), 15)
     for i, k in enumerate(control_center.keys()): 
         # IS THERE DISCREPANCY BETWEEN TEMPLATE AND ACTUAL NODE TYPE
@@ -805,8 +997,8 @@ def check_missing_children(config_path = None, **kwargs):
 
         parent_controls = get_control_center(collected_path)
         parent_structure = get_section_structure(collected_path)
-        print(parent_structure)
-        print('Figure out some helpful logic here' * 30)
+
+        momeutils.crline('Figure out some helpful logic here' * 15)
         
         # CAREFUL ! THERE IS A VULNERABILITY IN FIND_NODE --> NODES THAT DIFFER ONLY BY THE HASH CAN BE MIXED UP  
         # parent_contents = find_node_in_structure(config['report_structure'], lvl, part, tmp_key_formatting(name, up_= True).strip(), hash_)
@@ -891,10 +1083,19 @@ def pour_info(config_path=None, **kwargs):
         control_center[s]['user_instruction'] = results[k]
         
         if k in leftovers: 
-            p = "Consider the following user-provided text: **{}**\n\nWe were trying to identify content for a section named {} and containing the following subsections {}. \n\nSpecifically, focus is on {}.Here is its positionning in the document hierarchy: \n{}\n\nIn the initial pass, it was deemed that the user-provided text did not contain relevant information to the target section. Based on your expert knowledge, suggest meaningful and insightful contents, topic or concepts that could enhance the current guidelines ? Your answer must go directly to the specifics (aka, directly provide your suggestions, avoid starting with unnecessary 'To enhance guidelines, blabla')".format(section_structure['initial_contents'], config['focus_node'].split('_')[-2], "\n*".join([''] + section_structure['subs_titles']), s, " ".join(["\n" + "\t" * i +"* " + h for i, h in enumerate(hierarchy)]))
+            # p = "Consider the following user-provided text: **{}**\n\nWe were trying to identify content for a section named {} and containing the following subsections {}. \n\nSpecifically, focus is on {}.Here is its positionning in the document hierarchy: \n{}\n\nIn the initial pass, it was deemed that the user-provided text did not contain relevant information to the target section. Based on your expert knowledge, suggest meaningful and insightful contents, topic or concepts that could enhance the current guidelines ? Your answer must go directly to the specifics (aka, directly provide your suggestions, avoid starting with unnecessary 'To enhance guidelines, blabla')".format(section_structure['initial_contents'], config['focus_node'].split('_')[-2], "\n*".join([''] + section_structure['subs_titles']), s, " ".join(["\n" + "\t" * i +"* " + h for i, h in enumerate(hierarchy)]))
             # input(p)
-            control_center[s]['model_suggestion'] = momeutils.basic_task(p, model = 'g4o')
+            # control_center[s]['model_suggestion'] = momeutils.basic_task(p, model = 'g4o')
+            control_center[s]['model_suggestion'] = "Some model suggestion"
         # Add additional details here
+        else: 
+            # Adding consistency details to maintain coherence 
+            # p = "Consider the following user-provided initial contents: \n\n{} \n\nThose initial contents are split between the following sections: {}\n\nAfter a split stage, the current target section {} named **{}** got filled with the following: \n{}\n\nGiven that this section will have downstream children and that the goal is to produce an efficient and coherent report, which details (if any) from the **initial contents** should be subtly included to avoid missing to maintain consistency and coherence ? Answer with a short rationale listing those needed details if there are any , otherwise answer with an empty string.".format(section_structure['initial_contents'], section_structure['subs_titles'],
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        #  i, s, control_center[s]['user_instruction'])
+            out = "hello"
+
+            # out = momeutils.basic_task(p, model = 'g4o')
+            control_center[s]['consistency_elements'] = out
     
     # updating sections 
     mome.update_section(focus_node_path, "Control center", momeutils.j_deco(control_center))
@@ -1262,6 +1463,7 @@ def structure_propagation(config_path = None, **kwargs):
     focus_node = get_focus_node(config)
     hierarchy = collect_hierarchy_to_focus_node(config)
 
+    # momeutils.dj(focus_node['control'])
     
     subs_titles_syntax_check(focus_node)  
 
@@ -1290,13 +1492,12 @@ def structure_propagation(config_path = None, **kwargs):
 
         current_dynasty = format_dynasty((mome.collect_dynasty_paths(focus_node['path'], include_root=True, preserve_hierarchy=True)), keep_path= True)
 
-        momeutils.dj({'to_change': to_change, 
-                      'to_add': to_add, 
-                      "to_remove": to_remove})
+        # momeutils.dj({'to_change': to_change, 
+        #               'to_add': to_add, 
+        #               "to_remove": to_remove})
         
         current_control_center = focus_node['control']
-
-        
+        # momeutils.dj(current_control_center)
 
         # UPDATE EXISTING NODES  
         for node in to_change: 
@@ -1335,7 +1536,7 @@ def structure_propagation(config_path = None, **kwargs):
             current_dynasty['children'].insert(node['current_index'], 
                                                 {'path': os.path.join(os.path.dirname(focus_node['path']), current_node_name), 
                                                     'children': []})
-            
+            # momeutils.dj(current_control_center)
             mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(current_control_center))
 
             # Updating links --> Adding the link too early introduces problems when parsing the hierarchy
@@ -1605,6 +1806,7 @@ def do_control_center_from_base_contents(focus_node_path):
 
 def get_default_section_dict(): 
     return {"user_instruction" : None, 
+        "consistency_elements": None,   
         "additional_details": None, 
         "template": "default"}
 
@@ -1626,11 +1828,13 @@ def clean_dynasty(root, include_root, link_section = "Links"):
 
 def setup_control_center_from_hls(structure):
     subs_titles = gf_all(structure, show_structure=True)
+    # momeutils.dj({"Subs titles": subs_titles})
     return setup_control_center(subs_titles)
  
 def setup_control_center(named_templates): 
 
     base_format = {"user_instruction": None,
+                   "consistency_elements": None, 
                    "additional_details": None,
                    "template": "default"}
     results = {}
@@ -1655,18 +1859,6 @@ def setup_section_structure(**kwargs):
         if k in c.keys(): 
             c[k] = kwargs[k]
     return c
-
-def setup_section_structure2(initial_contents): 
-    contents_to_insert = ''
-    if isinstance(initial_contents, dict): 
-        contents_to_insert = "  ".join("{}: {}".format(k, v) for k,v in initial_contents.items())
-    elif isinstance(initial_contents, list): 
-        contents_to_insert = " ".join(initial_contents)
-    else: 
-        contents_to_insert = initial_contents
-    return {"initial_contents": contents_to_insert, 
-            "subs_titles" : [],
-            "nb_subs": 2,}
 
 def setup_control_params(suggested_sections): 
     if isinstance(suggested_sections, list): 
