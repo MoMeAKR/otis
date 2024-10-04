@@ -950,14 +950,15 @@ def check_missing_children(config_path = None, **kwargs):
     
     if is_leaf(focus_node['path']):
         # TO BE UPDATED 
-        return
-    
-    all_leaves = mome.collect_leaf_paths(focus_node['path']) 
+        # return
+        all_leaves = [focus_node['path']]
+    else:     
+        all_leaves = mome.collect_leaf_paths(focus_node['path']) 
 
     missing_results = {}
     for leaf in all_leaves: 
         name = momeutils.bn(leaf).split('_')[-2]
-        if name == "ToFill": 
+        if name == "ToFill" or get_control_center(leaf)['content'] == None:
             leaf_hierarchy = collect_hierarchy_to_children(config, momeutils.bn(leaf))
 
             missing_results[momeutils.bn(leaf)] = {"status": "empty", 
@@ -975,26 +976,39 @@ def check_missing_children(config_path = None, **kwargs):
         # HEROIC ATTEMPT TO FIND THE PARENT
         for i in range(10): 
             parent_name = missing_results[k]['hierarchy'][-2]  
-            # print('Lookding for parent {} - lvl {} - part {}'.format(parent_name, lvl-1, i))
-            parent_result = find_node_in_structure(config['report_structure'], lvl-1, i, tmp_key_formatting(parent_name, up_= True).strip())
+            # momeutils.crline('Lookding for parent {} - lvl {} - part {}'.format(parent_name, lvl-1, i))
+            # momeutils.dj(config['report_structure'])
+            parent_result = find_node_in_structure(config['report_structure'], lvl-1, i, tmp_key_formatting(parent_name, up_= True).strip(), current_lvl = -1)
             if parent_result is not None: 
                 # print('Found parent')
                 break
-        root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
-        current_dynasty = format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True))
-        collected_path = None
-        for pr in parent_result: 
-            if isinstance(pr, int): 
-                current_dynasty = current_dynasty['children'][pr]
-            elif isinstance(pr, str): 
-                if current_dynasty['name'] == pr: 
-                    collected_path = os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
-                    break 
-                # input(current_dynasty)
-                target_idx = [i for i, c in enumerate(current_dynasty['children']) if c['name'] == pr][0]
-                current_dynasty = current_dynasty['children'][target_idx]
-        # ====================================
+        
+        # momeutils.crline('Parent result {}'.format(parent_result))
 
+        root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
+        current_dynasty = format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True))['children']
+        for cd in current_dynasty: 
+            if cd['name'] == parent_result[0]: 
+                current_dynasty = cd 
+                break 
+
+        if len(parent_result) == 1: 
+            collected_path = os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
+        else:
+            collected_path = None
+            for pr in parent_result[1:]: 
+                if isinstance(pr, int): 
+                    current_dynasty = current_dynasty['children'][pr]
+                elif isinstance(pr, str): 
+                    if current_dynasty['name'] == pr: 
+                        # input('valid condition')
+                        collected_path = os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
+                        break 
+                    # input(current_dynasty)
+                    target_idx = [i for i, c in enumerate(current_dynasty['children']) if c['name'] == pr][0]
+                    current_dynasty = current_dynasty['children'][target_idx]
+            # ====================================
+        input(collected_path)
         parent_controls = get_control_center(collected_path)
         parent_structure = get_section_structure(collected_path)
 
@@ -1046,8 +1060,7 @@ def run_eval(config_path= None, **kwargs):
 
     save_config(config, config_path)
 
-
-    
+  
 def pour_info(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
 
@@ -1258,16 +1271,21 @@ def find_node_in_structure(structure, lvl, part, name, current_lvl=0, current_pa
 
         # Check if the current level and part match the target
         if current_lvl == lvl and current_part == part:
+            # input('here')
             if isinstance(structure, str) and name.strip() == structure.strip():
                 # print('Found node {} at path {} - Structure: {}'.format(name, path, structure))
+                # input(' ok ? ? ? ? ')
                 return path    
             else: 
                 if isinstance(structure, dict): 
                     if structure[list(structure.keys())[0]][0] == "To Fill" and path[-1] == name: 
                         return path
                 elif isinstance(structure, list):
+                    # momeutils.dj({"Structure": structure, "Name": name, "Path": path})
                     if structure[0] == "To Fill" and path[-1] == name: 
                         return path 
+                    elif path[-1] == name: 
+                        return path
             
         # Recursively search through dictionaries
         if isinstance(structure, dict):
