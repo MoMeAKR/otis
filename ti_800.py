@@ -1,14 +1,103 @@
 
-import subprocess
-import inspect
-import glob
-import copy
-import shutil
-import re
-import momeutils
-import json
 import mome
+import inspect
+import shutil
+import momeutils
 import os
+import copy
+import subprocess
+import json
+import re
+import glob
+
+
+def evaluate_parameter_relevance(text_content = None, user_example = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are a content relevance assessor, tasked with determining the relevance of a user-provided content in a specific key to the high-level content of a text. You will receive a user-provided example and are expected to return an integer representing the relevance of the example to the text's content. Higher numbers indicate greater relevance.
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+        "relevance" : "An integer representing the relevance of the user-provided content regarding the section contents."
+    
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Text Content\n{}\n\n User Example\n{}\n\nAssess the relevance of the user-provided content to the section contents and return a relevance score between 0 and 10.\n\n".format(icl_examples, text_content, user_example)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return int(results["relevance"])
+
+
+def enhance_section_content(high_level_text = None, section_names = None, target_section = None, initial_section_content = None, user_instruction = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+             
+    You are a content enhancement specialist with expertise in rewriting and improving text. Your task is to enhance the content of a specific section based on user instructions. You will receive the initial content of the target section and instructions for enhancing it. Your goal is to rewrite and enhance the content, making it more engaging, informative, and relevant to the user's needs.
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+        "enhanced_text" : "The rewritten and enhanced version of the content for the target section."
+    
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n High Level Text\n{}\n\n Section Names\n{}\n\n Target Section\n{}\n\n Initial Section Content\n{}\n\n User Instruction\n{}\n\nRewrite and enhance the content for the target section using the provided instructions.\n\n".format(icl_examples, high_level_text, section_names, target_section, initial_section_content, user_instruction)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["enhanced_text"]
+
+
+def assess_text_sufficiency(core_text = None, target_subsections = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are an expert content analyst assisting the user in evaluating the completeness of a text against a set of target subsections. Your role is to receive the text and the list of subsections and evaluate how relevant the core text is to the distinct subsections.  
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+        "result": [
+
+{subsections}
+]
+    
+    }} 
+    ```
+    """.format(subsections = ",\n".join(['"Score (0 to 10) representing how relevant the provided core text is to subsection {}"'.format(s) for s in target_subsections]) )}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Core Text\n{}\n\n Target Subsections\n{}\n\nGiven a core text and a list of target subsections, rate the relevance between the core text, returning scores that reflect if it contains enough information to effectively discuss each subsection.\n\n".format(icl_examples, core_text, "\n*".join([""] + target_subsections))}
+    ]
+
+
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["result"]
 
 
 def identify_missing_elements_for_consistency(initial_content = None, subsections = None, target_subsection = None, current_extracted_text = None): 
@@ -1051,12 +1140,11 @@ def check_missing_children(config_path = None, **kwargs):
         parent_controls = get_control_center(collected_path)
         parent_structure = get_section_structure(collected_path)
 
-        momeutils.crline('Figure out some helpful logic here' * 15)
+        # momeutils.crline('Figure out some helpful logic here' * 15)
+    
+    # SHOULD FIGURE OUT SOME LOGIC TO HELP THE USER FILL IN THE MISSING PARTS
     
     momeutils.dj(collected_parents)
-        # CAREFUL ! THERE IS A VULNERABILITY IN FIND_NODE --> NODES THAT DIFFER ONLY BY THE HASH CAN BE MIXED UP  
-        # parent_contents = find_node_in_structure(config['report_structure'], lvl, part, tmp_key_formatting(name, up_= True).strip(), hash_)
-        # input(parent_contents)
 
 def update_report_structure_from_graph(config_path= None, **kwargs): 
     config = load_config(config_path, **kwargs)
@@ -1100,6 +1188,96 @@ def run_eval(config_path= None, **kwargs):
 
     save_config(config, config_path)
 
+def get_structure_children(node_path, config= None): 
+    if config is not None: 
+        node_path = os.path.join(config['interactive_graph_path'], momeutils.bn(node_path).split('.')[0] + ".md")
+    
+    structure = get_section_structure(node_path)
+    return structure['subs_titles']
+
+def look_ahead(config_path = None, **kwargs):
+
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    if is_leaf(focus_node['path']): 
+        momeutils.crline('Leaf node, nothing to do')
+        return
+    
+    # Collecting all direct children nodes 
+    current_hash = mome.get_short_hash(momeutils.bn(focus_node['path']), 15)
+    if is_root(config, focus_node['path']):
+        target_lvl = -1
+    else: 
+        target_lvl = int(momeutils.bn(focus_node['path']).split('_')[0].replace('lvl', ''))
+
+    target_nodes = ["lvl{}_part{}_{}_{}".format(target_lvl+1, i, k.replace(' ', ''), current_hash) for i, k in enumerate(focus_node['control'].keys())]
+
+    results = {}
+
+    # compilation_results = {}
+
+    # # PARALLELIZING THE COMPILATION
+    look_ahead_params = [
+        (run_look_ahead, (config, focus_node, key, tn)) for key, tn in zip(focus_node['control'].keys(), target_nodes)
+    ]
+
+
+    # saving focus node in case shit happens 
+    shutil.copy(focus_node['path'], os.path.join(os.path.dirname(__file__), '.tmp_focus_node.md'))
+    
+    try:
+        parallel_results = momeutils.mapper(look_ahead_params)
+        
+        # Applying results
+        control_center = focus_node['control']
+        for r, key in zip(parallel_results, control_center.keys()): 
+            if isinstance(r, dict): 
+                control_center[key]['look_ahead_results'] = {c:int(s) for c,s in zip(r['children'], r['scores'])}
+            else: 
+                control_center[key]['look_ahead_results'] = r                
+
+        mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(control_center))
+
+
+        os.remove(os.path.join(os.path.dirname(__file__), '.tmp_focus_node.md'))
+        save_config(config, config_path)
+    except Exception as e: 
+        momeutils.crline(f'Look ahead failed (probably parallel mapping)\nError: {e}')
+        shutil.move(os.path.join(os.path.dirname(__file__), '.tmp_focus_node.md'), focus_node['path'])
+    
+    
+
+
+def run_look_ahead(config, focus_node, key, target_node):
+
+    if is_leaf(os.path.join(config['interactive_graph_path'], target_node + ".md")):
+        return "leaf"
+    else: 
+        future_contents = get_control_center(focus_node['path'])[key]['user_instruction'] 
+        future_children = get_structure_children(target_node, config)
+        out = assess_text_sufficiency(future_contents, future_children)
+        # process_text_sufficiency(config, focus_node, key, future_children, out)
+        return {"scores": out, "children": future_children}
+
+  
+
+# def process_text_sufficiency(config, focus_node, key, future_children, out):
+
+#     control_center = get_control_center(get_focus_node(config)['path'])
+    
+#     # enhancing section 
+#     if not 'look_ahead_results' in control_center[key].keys():
+#                 control_center[key]['look_ahead_results'] = {}
+
+#     for i, oo in enumerate(out): 
+#         if oo < 5:         
+#             control_center[key]['look_ahead_results'][future_children[i]] = "You messed up, dummy. Relevance score is {}".upper().format(oo)
+#         else: 
+#             control_center[key]['look_ahead_results'][future_children[i]] = None
+    
+#     mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(control_center))
+
+        
   
 def pour_info(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -1127,28 +1305,79 @@ def pour_info(config_path=None, **kwargs):
     leftovers = []
     results = simple_extract(sample_text = section_structure['initial_contents'], 
                              sections = section_structure['subs_titles'],)
-    for k,v in results.items():
+    for i, (k,v) in enumerate(results.items()):
         if v is None or v.strip().lower() == "null": 
             leftovers.append(k)
+        control_center[list(control_center.keys())[i]]['user_instruction'] = v
     
+    pour_info_params = [
+        (run_pour_info, (config, control_center, section_structure, leftovers, key, results)) for key in control_center.keys()
+    ]
+    parallel_results = momeutils.mapper(pour_info_params)   
 
-    for i, (s,k) in enumerate(zip(section_structure['subs_titles'], results.keys())): 
-        control_center[s]['user_instruction'] = results[k]
-        
-        if k in leftovers: 
-            # TODO add something to help enhancing that specific key 
-            control_center[s]['model_suggestion'] = "Some model suggestion"
-        # Add additional details here
-        else: 
-            # Adding consistency details to maintain coherence 
-            out = identify_missing_elements_for_consistency(section_structure['initial_contents'], section_structure['subs_titles'], k, control_center[s]['user_instruction'])
-            control_center[s]['consistency_elements'] = out
-    
-    # updating sections 
+    for i, (p, k)  in enumerate(zip(parallel_results, control_center.keys())): 
+        control_center[k][p[0]] = p[1]
+
     mome.update_section(focus_node_path, "Control center", momeutils.j_deco(control_center))
-
     save_config(config, config_path)
     return leftovers
+
+def run_pour_info(config, control_center, section_structure, leftovers, key, results):
+
+    if key in leftovers: 
+        result = "Some model suggestion"
+        return ["model_suggestion", result]
+    else: 
+        result = identify_missing_elements_for_consistency(section_structure['initial_contents'], section_structure['subs_titles'], key, control_center[key]['user_instruction'])
+        return ["consistency_elements", result]
+
+
+    # for i, (s,k) in enumerate(zip(section_structure['subs_titles'], results.keys())): 
+    #     control_center[s]['user_instruction'] = results[k]
+        
+    #     if k in leftovers: 
+    #         # TODO add something to help enhancing that specific key 
+    #         control_center[s]['model_suggestion'] = "Some model suggestion"
+    #     # Add additional details here
+    #     else: 
+    #         # Adding consistency details to maintain coherence 
+    #         out = identify_missing_elements_for_consistency(section_structure['initial_contents'], section_structure['subs_titles'], k, control_center[s]['user_instruction'])
+    #         control_center[s]['consistency_elements'] = out
+    
+    # # updating sections 
+    # mome.update_section(focus_node_path, "Control center", momeutils.j_deco(control_center))
+
+    # save_config(config, config_path)
+    # return leftovers
+
+def model_inspiration(config_path = None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    # ASSUMING WE FOCUS ON A KEY IN THE CONTROL CENTER 
+    control_center = focus_node['control']
+    structure = focus_node['structure']
+    control_key = config['control_key']
+    ui = "Specific user guiding: {}".format(config['user_instruction']) if config['user_instruction'].strip() != "" else ""
+
+    lvl, part, name, _ = split_node_for_info(focus_node['path'])
+
+    key_id = check_matching_key(control_center, control_key)
+    current_contents = control_center[key_id]['user_instruction']
+    
+    momeutils.unconstrained_task(f"In the context of writing a report, we're currently focused on the section '{name}' with the following contents\n\n{json.dumps(control_center, indent = 4)}\n\n The user is lacking inspiration for the part named {key_id}, which currently contains the following: {current_contents}\n\n{ui}\n\nProvide some inspiration to enhance and develop the target section {key_id}", model = "g4o")  
+
+
+def expand_initial_contents(config_path = None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    control_center = focus_node['control']
+    structure = focus_node['structure']
+
+    control_center_contents = {k: v['user_instruction'] for k,v in control_center.items()}
+    structure['initial_contents'] = "\n\n".join(["{}: {}".format(k,v) for k,v in control_center_contents.items()])
+    mome.update_section(focus_node['path'], "Section structure", momeutils.j_deco(structure))
+    save_config(config, config_path)
+
 
 def push_specific_parameter(config_path= None, **kwargs): 
     config= load_config(config_path, **kwargs)
@@ -1160,15 +1389,50 @@ def push_specific_parameter(config_path= None, **kwargs):
     if is_leaf(focus_node['path']):
         target_children = [focus_node['path']]
     else: 
-        
         target_children = collect_all_compilable_children(focus_node_path=focus_node['path'])
-    for c in target_children: 
-        control_center = get_control_center(c)
-        p = "In the context of automated long-form text generation, we are looking to enhance the current leaf paragraph with a {}. The initial (fixed) context is described by the following parameters: \n{}\n\nFrom a high-level standpoint, overlooking multiple paragraph, the user has requested the following content to be included \n{}\n\nBased on the context, is the user provided input relevant or should it be kept for other places ? Answer with a short rationale and then conclude with an integer score from 0 to 10, (10 being perfect fit).".format(
-            param_key, json.dumps(control_center, indent = 4), "{} --> {}".format(param_key, param_content))
-        # input(p)
-        print('Considering node: {}'.format(c))
-        result = momeutils.basic_task(p, model = 'g4o')
+
+    psp_params = [
+        (run_push_specific_parameter, (c, param_key, param_content)) for c in target_children
+    ]
+    psp_results = momeutils.mapper(psp_params)
+    if max(psp_results) < 7: 
+        momeutils.crline('Nodes are not relevant')
+    else:
+        max_val = max(psp_results)
+        occurences = [i for i, v in enumerate(psp_results) if v == max_val]
+        if len(occurences) > 1: 
+            best_node_idx = occurences[1]# comparison_function([os.path.join(config['interactive_graph_path'], target_children[o] + ".md") for o in occurences])
+        else: 
+            best_node_idx = occurences[0]
+        best_node = os.path.join(config['interactive_graph_path'], momeutils.bn(target_children[best_node_idx]) + ".md")
+        control_center = get_control_center(best_node)
+        control_center[param_key] = param_content
+        mome.update_section(best_node, "Control center", momeutils.j_deco(control_center))
+
+    save_config(config, config_path)        
+
+def run_push_specific_parameter(node, param_key, param_content):
+
+    control_center = get_control_center(node)
+    lvl, part, name, _ = split_node_for_info(node) 
+    momeutils.crline('Considering node: {}'.format(momeutils.bn(node)))
+    result = evaluate_parameter_relevance("Section name: {}\nTarget key: {}\nContents: \n{}".format(name, param_key, json.dumps(control_center, indent = 4)), param_content)
+    return result
+
+
+
+    # for c in target_children: 
+    #     control_center = get_control_center(c)
+    #     lvl, part, name, _ = split_node_for_info(c) 
+    #     momeutils.crline('Considering node: {}'.format(c))
+    #     result = evaluate_parameter_relevance("Section name: {}\nTarget key: {}\nContents: \n{}".format(name, param_key, json.dumps(control_center, indent = 4)), param_content)
+
+
+        # p = "In the context of automated long-form text generation, we are looking to enhance the current leaf paragraph with a {}. The initial (fixed) context is described by the following parameters: \n{}\n\nFrom a high-level standpoint, overlooking multiple paragraph, the user has requested the following content to be included \n{}\n\nBased on the context, is the user provided input relevant or should it be kept for other places ? Answer with a short rationale and then conclude with an integer score from 0 to 10, (10 being perfect fit).".format(
+        #     param_key, json.dumps(control_center, indent = 4), "{} --> {}".format(param_key, param_content))
+        # # input(p)
+        # print('Considering node: {}'.format(c))
+        # result = momeutils.basic_task(p, model = 'g4o')
 
 def check_matching_key(control_center, control_key):
 
@@ -1190,9 +1454,15 @@ def enhance_control_key(config_path=None, **kwargs):
     # Find the key that starts with the control_key
     key_id = check_matching_key(control_center, control_key)
 
-    p = "Initial complete content before split: {}\n\nTarget section: {}\n\nInitial content assigned to section: {}\n\nUser request: {}\n\nEnhance the Initial content assigned to section taking into account the global context and with particular attention to the user request.".format(section_structure['initial_contents'],
-                                                     control_key, control_center[key_id], control_contents)
-    out = momeutils.basic_task(p, model = "g4o")
+    # p = "Initial complete content before split: {}\n\nTarget section: {}\n\nInitial content assigned to section: {}\n\nUser request: {}\n\nEnhance the Initial content assigned to section taking into account the global context and with particular attention to the user request.".format(section_structure['initial_contents'],
+    #                                                  control_key, control_center[key_id], control_contents)
+    # # out = momeutils.basic_task(p, model = "g4o")
+    # def enhance_section_content(high_level_text = None, section_names = None, target_section = None, initial_section_content = None, user_instruction = None): 
+    out = enhance_section_content(section_structure['initial_contents'], 
+                                  "\n".join([""] + section_structure['subs_titles']), 
+                                  key_id,
+                                 control_center[key_id]['user_instruction'], 
+                                 control_contents)
     control_center[key_id]['user_instruction'] = out
     mome.update_section(focus_node['path'], "Control center", momeutils.j_deco(control_center))
     save_config(config, config_path)   
