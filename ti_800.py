@@ -75,7 +75,7 @@ def assess_text_sufficiency(core_text = None, target_subsections = None):
     
     messages = [
             {"role": "system", "content": """
-    You are an expert content analyst assisting the user in evaluating the completeness of a text against a set of target subsections. Your role is to receive the text and the list of subsections and evaluate how relevant the core text is to the distinct subsections.  
+    You are an expert content analyst assisting the user in evaluating the completeness of a text against a set of target subsections. Your role is to receive the text and the list of subsections and evaluate how relevant (score ranging from 0 to 10, 10 being the best match) the core text is to the distinct subsections.  
     Answer in a valid JSON format as follows:
     ```json
     {{
@@ -87,8 +87,8 @@ def assess_text_sufficiency(core_text = None, target_subsections = None):
     
     }} 
     ```
-    """.format(subsections = ",\n".join(['"Score (0 to 10) representing how relevant the provided core text is to subsection {}"'.format(s) for s in target_subsections]) )}, 
-        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Core Text\n{}\n\n Target Subsections\n{}\n\nGiven a core text and a list of target subsections, rate the relevance between the core text, returning scores that reflect if it contains enough information to effectively discuss each subsection.\n\n".format(icl_examples, core_text, "\n*".join([""] + target_subsections))}
+    """.format(subsections = ",\n".join(['"Integer score for subsection {}"'.format(s) for s in target_subsections]) )}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Core Text\n{}\n\n Target Subsections\n{}\n\nGiven a core text and a list of target subsections, rate the relevance between the core text, returning integer scores that reflect if it contains enough information to effectively discuss each subsection.\n\n".format(icl_examples, core_text, "\n*".join([""] + target_subsections))}
     ]
 
 
@@ -472,8 +472,8 @@ def format_dynasty(dynasty, keep_path = False):
     return formatted
 
 def formatted_path_to_children(dynasty, children): 
-
     result= path_to_children(dynasty, children)
+
     root_name = result[0]
     # result[0] = 'Root'
     cleaned_result = ['Root']
@@ -921,10 +921,16 @@ def do_propagate(config_path=None, **kwargs):
 def collect_hierarchy_to_focus_node(config):
     return collect_hierarchy_to_children(config, config['focus_node'])
      
-def collect_hierarchy_to_children(config, target_node_path): 
+def collect_hierarchy_to_children(config, target_node_path, raw = False): 
     root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
-    hierarchy = formatted_path_to_children(format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True)), target_node_path)
-    return hierarchy
+    full_dynasty = mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True)
+    formatted_full = format_dynasty(full_dynasty)
+    if raw:
+        to_children = path_to_children(formatted_full, target_node_path)
+    else:
+        to_children = formatted_path_to_children(formatted_full, target_node_path)
+    # hierarchy = formatted_path_to_children(format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True)), target_node_path)
+    return to_children
 
 
 def add_default_hierarchical_node(focus_node_contents, node_name, parent_path = None): 
@@ -1070,81 +1076,246 @@ def tmp_check_innov(contents):
     return int(momeutils.basic_task(p, model = 'g4o'))
 
 
-def check_missing_children(config_path = None, **kwargs): 
+def find_parent(config, node_name, hierarchy = None):
+    """
+    Finds the parent of a given node name using the provided hierarchy.
+
+    :param config: Configuration dictionary containing report structure and paths.
+    :param node_name: The name of the node for which to find the parent.
+    :param hierarchy: The hierarchy list of the node.
+    :return: The path of the parent node if found, otherwise None.
+    """
+    lvl, part, name, hash_ = split_node_for_info(node_name)
+
+    if hierarchy is None:
+        hierarchy = collect_hierarchy_to_children(config, node_name)
+
+    parent_result = None
+    for i in range(10):
+        parent_name = hierarchy[-2]
+        parent_result = find_node_in_structure(
+            config['report_structure'],
+            lvl - 1,
+            i,
+            tmp_key_formatting(parent_name, up_=True).strip(),
+            current_lvl=-1
+        )
+        if parent_result is not None:
+            break
+
+    if parent_result is None:
+        return None
+
+    root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
+    current_dynasty = format_dynasty(
+        mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True)
+    )['children']
+
+    for cd in current_dynasty:
+        if cd['name'] == parent_result[0]:
+            current_dynasty = cd
+            break
+
     
+
+    if len(parent_result) == 1:
+        return os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
+    # momeutils.crline(node_name)
+    # momeutils.crline("{}".format(json.dumps(current_dynasty, indent=4)))
+    # momeutils.crline(parent_result)
+
+
+    # Replace the original part with the new search function
+    flat_hierarchy = flatten_hierarchy(current_dynasty)
+    parent_path = find_parent_path(flat_hierarchy, parent_result[-1])
+
+    return os.path.join(config['interactive_graph_path'], parent_path.split('/')[-1] + ".md")
+    
+
+    # # ========================================
+    # # I want to replace the part below by a search function that flattens the hierarchy and looks for the parent_results[-1]
+    # for pr in parent_result[1:]:
+    #     if isinstance(pr, int):
+    #         current_dynasty = current_dynasty['children'][pr]
+    #     elif isinstance(pr, str):
+    #         if current_dynasty['name'] == pr:
+    #             momeutils.crline(f'Looking for {node_name} - Parent name {pr} ')
+    #             input(current_dynasty)
+    #             return os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
+    #         target_idx = [i for i, c in enumerate(current_dynasty['children']) if c['name'] == pr][0]
+    #         current_dynasty = current_dynasty['children'][target_idx]
+
+    # # return None
+    # collected_path = flatten_hierarchy_and_find_path(current_dynasty, parent_result)
+    # momeutils.uinput("{}".format(collected_path))
+    # return os.path.join(config['interactive_graph_path'], collected_path + '.md') 
+
+def flatten_hierarchy(hierarchy):
+    """
+    Flattens a nested hierarchy into a list of nodes with their paths.
+
+    :param hierarchy: The nested hierarchy to flatten.
+    :return: A list of tuples containing node names and their paths.
+    """
+    flat_list = []
+
+    def _flatten(current_node, current_path):
+        flat_list.append((current_node['name'], current_path))
+        for child in current_node.get('children', []):
+            _flatten(child, os.path.join(current_path, child['path']))
+
+    _flatten(hierarchy, hierarchy['path'])
+    return flat_list
+
+def find_parent_path(flat_hierarchy, target_name):
+    """
+    Finds the path of the target node in the flattened hierarchy.
+
+    :param flat_hierarchy: The flattened hierarchy list.
+    :param target_name: The name of the target node.
+    :return: The path of the target node if found, otherwise None.
+    """
+    for name, path in flat_hierarchy:
+        if name == target_name:
+            return path
+    return None
+
+
+# def flatten_hierarchy_and_find_path(current_dynasty, parent_result):
+#     """
+#     Flattens the hierarchy and finds the path for the given parent result.
+
+#     :param current_dynasty: The current hierarchy structure.
+#     :param parent_result: The result containing the path to the parent node.
+#     :return: The path of the parent node if found, otherwise None.
+#     """
+#     def search_hierarchy(dynasty, target):
+#         if dynasty['name'] == target:
+#             return dynasty['path']
+#         for child in dynasty.get('children', []):
+#             result = search_hierarchy(child, target)
+#             if result:
+#                 return result
+#         return None
+
+#     for pr in parent_result[1:]:
+#         if isinstance(pr, int):
+#             current_dynasty = current_dynasty['children'][pr]
+#         elif isinstance(pr, str):
+#             path = search_hierarchy(current_dynasty, pr)
+#             if path:
+#                 return path, #os.path.join(config['interactive_graph_path'], path + '.md')
+
+#     return None
+
+
+def check_missing_children(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
     focus_node = get_focus_node(config)
-    
+
     if is_leaf(focus_node['path']):
-        # TO BE UPDATED 
-        # return
         all_leaves = [focus_node['path']]
-    else:     
-        all_leaves = mome.collect_leaf_paths(focus_node['path']) 
+    else:
+        all_leaves = mome.collect_leaf_paths(focus_node['path'])
 
     missing_results = {}
-    for leaf in all_leaves: 
+    for leaf in all_leaves:
         name = momeutils.bn(leaf).split('_')[-2]
-        if name == "ToFill" or get_control_center(leaf)['content'] == None:
+        if name == "ToFill" or get_control_center(leaf)['content'] is None:
             leaf_hierarchy = collect_hierarchy_to_children(config, momeutils.bn(leaf))
+            missing_results[momeutils.bn(leaf)] = {"status": "empty", "hierarchy": leaf_hierarchy}
 
-            missing_results[momeutils.bn(leaf)] = {"status": "empty", 
-                                     "hierarchy": leaf_hierarchy}
-    
     momeutils.crline('Missing: \n\n{}'.format(
-        json.dumps(missing_results, indent = 4)
+        json.dumps(missing_results, indent=4)
     ))
 
-    # # processing missing results
     collected_parents = []
-    for k in missing_results: 
-        lvl, part, name, hash_ = split_node_for_info(k)
+    for k in missing_results:
+        parent_path = find_parent(config, k, None) #missing_results[k]['hierarchy'])
+        if parent_path:
+            collected_parents.append([momeutils.bn(parent_path), momeutils.bn(k)])
+            parent_controls = get_control_center(parent_path)
+            parent_structure = get_section_structure(parent_path)
 
-        # ====================================
-        # HEROIC ATTEMPT TO FIND THE PARENT
-        for i in range(10): 
-            parent_name = missing_results[k]['hierarchy'][-2]  
-            # momeutils.crline('Lookding for parent {} - lvl {} - part {}'.format(parent_name, lvl-1, i))
-            # momeutils.dj(config['report_structure'])
-            parent_result = find_node_in_structure(config['report_structure'], lvl-1, i, tmp_key_formatting(parent_name, up_= True).strip(), current_lvl = -1)
-            if parent_result is not None: 
-                # print('Found parent')
-                break
-        
-        # momeutils.crline('Parent result {}'.format(parent_result))
-
-        root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
-        current_dynasty = format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True))['children']
-        for cd in current_dynasty: 
-            if cd['name'] == parent_result[0]: 
-                current_dynasty = cd 
-                break 
-
-        if len(parent_result) == 1: 
-            collected_path = os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
-        else:
-            collected_path = None
-            for pr in parent_result[1:]: 
-                if isinstance(pr, int): 
-                    current_dynasty = current_dynasty['children'][pr]
-                elif isinstance(pr, str): 
-                    if current_dynasty['name'] == pr: 
-                        # input('valid condition')
-                        collected_path = os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
-                        break 
-                    # input(current_dynasty)
-                    target_idx = [i for i, c in enumerate(current_dynasty['children']) if c['name'] == pr][0]
-                    current_dynasty = current_dynasty['children'][target_idx]
-            # ====================================
-        collected_parents.append([momeutils.bn(collected_path), momeutils.bn(k)])
-        parent_controls = get_control_center(collected_path)
-        parent_structure = get_section_structure(collected_path)
-
-        # momeutils.crline('Figure out some helpful logic here' * 15)
-    
-    # SHOULD FIGURE OUT SOME LOGIC TO HELP THE USER FILL IN THE MISSING PARTS
-    
     momeutils.dj(collected_parents)
+
+
+
+# def check_missing_children(config_path = None, **kwargs): 
+    
+#     config = load_config(config_path, **kwargs)
+#     focus_node = get_focus_node(config)
+    
+#     if is_leaf(focus_node['path']):
+#         # TO BE UPDATED 
+#         # return
+#         all_leaves = [focus_node['path']]
+#     else:     
+#         all_leaves = mome.collect_leaf_paths(focus_node['path']) 
+
+#     missing_results = {}
+#     for leaf in all_leaves: 
+#         name = momeutils.bn(leaf).split('_')[-2]
+#         if name == "ToFill" or get_control_center(leaf)['content'] == None:
+#             leaf_hierarchy = collect_hierarchy_to_children(config, momeutils.bn(leaf))
+
+#             missing_results[momeutils.bn(leaf)] = {"status": "empty", 
+#                                      "hierarchy": leaf_hierarchy}
+    
+#     momeutils.crline('Missing: \n\n{}'.format(
+#         json.dumps(missing_results, indent = 4)
+#     ))
+
+#     # # processing missing results
+#     collected_parents = []
+#     for k in missing_results: 
+#         lvl, part, name, hash_ = split_node_for_info(k)
+
+#         # ====================================
+#         # HEROIC ATTEMPT TO FIND THE PARENT
+#         for i in range(10): 
+#             parent_name = missing_results[k]['hierarchy'][-2]  
+#             # momeutils.crline('Lookding for parent {} - lvl {} - part {}'.format(parent_name, lvl-1, i))
+#             # momeutils.dj(config['report_structure'])
+#             parent_result = find_node_in_structure(config['report_structure'], lvl-1, i, tmp_key_formatting(parent_name, up_= True).strip(), current_lvl = -1)
+#             if parent_result is not None: 
+#                 # print('Found parent')
+#                 break
+        
+#         # momeutils.crline('Parent result {}'.format(parent_result))
+
+#         root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
+#         current_dynasty = format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True))['children']
+#         for cd in current_dynasty: 
+#             if cd['name'] == parent_result[0]: 
+#                 current_dynasty = cd 
+#                 break 
+
+#         if len(parent_result) == 1: 
+#             collected_path = os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
+#         else:
+#             collected_path = None
+#             for pr in parent_result[1:]: 
+#                 if isinstance(pr, int): 
+#                     current_dynasty = current_dynasty['children'][pr]
+#                 elif isinstance(pr, str): 
+#                     if current_dynasty['name'] == pr: 
+#                         # input('valid condition')
+#                         collected_path = os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
+#                         break 
+#                     # input(current_dynasty)
+#                     target_idx = [i for i, c in enumerate(current_dynasty['children']) if c['name'] == pr][0]
+#                     current_dynasty = current_dynasty['children'][target_idx]
+#             # ====================================
+#         collected_parents.append([momeutils.bn(collected_path), momeutils.bn(k)])
+#         parent_controls = get_control_center(collected_path)
+#         parent_structure = get_section_structure(collected_path)
+
+#         # momeutils.crline('Figure out some helpful logic here' * 15)
+    
+#     # SHOULD FIGURE OUT SOME LOGIC TO HELP THE USER FILL IN THE MISSING PARTS
+    
+#     momeutils.dj(collected_parents)
 
 def update_report_structure_from_graph(config_path= None, **kwargs): 
     config = load_config(config_path, **kwargs)
@@ -1376,6 +1547,19 @@ def expand_initial_contents(config_path = None, **kwargs):
     control_center_contents = {k: v['user_instruction'] for k,v in control_center.items()}
     structure['initial_contents'] = "\n\n".join(["{}: {}".format(k,v) for k,v in control_center_contents.items()])
     mome.update_section(focus_node['path'], "Section structure", momeutils.j_deco(structure))
+
+    # # PROPAGATION
+
+    hierarchy = collect_hierarchy_to_children(config, momeutils.bn(focus_node['path']), raw = True)
+    _, _, name, _ = split_node_for_info(focus_node['path'])
+    
+    parent_node = os.path.join(config['interactive_graph_path'], hierarchy[-2] + ".md")
+    parent_node_control = get_control_center(parent_node)
+    parent_node_control[tmp_key_formatting(name, up_=True)]['user_instruction'] = structure['initial_contents']
+
+    momeutils.crline('Propagating to parent node {}'.format(momeutils.bn(parent_node)))
+    mome.update_section(parent_node, "Control center", momeutils.j_deco(parent_node_control))
+
     save_config(config, config_path)
 
 
