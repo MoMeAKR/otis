@@ -1125,15 +1125,12 @@ def find_parent(config, node_name, hierarchy = None):
     # momeutils.crline(parent_result)
 
 
-    # Replace the original part with the new search function
     flat_hierarchy = flatten_hierarchy(current_dynasty)
     parent_path = find_parent_path(flat_hierarchy, parent_result[-1])
 
     return os.path.join(config['interactive_graph_path'], parent_path.split('/')[-1] + ".md")
     
 
-    # # ========================================
-    # # I want to replace the part below by a search function that flattens the hierarchy and looks for the parent_results[-1]
     # for pr in parent_result[1:]:
     #     if isinstance(pr, int):
     #         current_dynasty = current_dynasty['children'][pr]
@@ -1499,7 +1496,7 @@ def run_pour_info(config, control_center, section_structure, leftovers, key, res
         result = "Some model suggestion"
         return ["model_suggestion", result]
     else: 
-        result = identify_missing_elements_for_consistency(section_structure['initial_contents'], section_structure['subs_titles'], key, control_center[key]['user_instruction'])
+        result = "Check consistency " #identify_missing_elements_for_consistency(section_structure['initial_contents'], section_structure['subs_titles'], key, control_center[key]['user_instruction'])
         return ["consistency_elements", result]
 
 
@@ -1537,6 +1534,35 @@ def model_inspiration(config_path = None, **kwargs):
     
     momeutils.unconstrained_task(f"In the context of writing a report, we're currently focused on the section '{name}' with the following contents\n\n{json.dumps(control_center, indent = 4)}\n\n The user is lacking inspiration for the part named {key_id}, which currently contains the following: {current_contents}\n\n{ui}\n\nProvide some inspiration to enhance and develop the target section {key_id}", model = "g4o")  
 
+def set_templates(config_path= None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    control_center = focus_node['control']
+
+    assert 'templates' in kwargs.keys(), "No templates provided in config"
+    assert len(kwargs['templates']) == len(control_center.keys())
+    for i, k in enumerate(control_center.keys()):
+        control_center[k]['template'] = kwargs['templates'][i].strip()
+    mome.update_section(focus_node['path'], "Control center", momeutils.j_deco(control_center))
+    save_config(config, config_path)
+
+def direct_structure_update(config_path= None, **kwargs):   
+    config = load_config(config_path, **kwargs)
+    config = check_children_node_existence(config)
+    config = update_children_node_state(config)
+    save_config(config, config_path)
+
+
+def set_subtitles(config_path= None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    structure = focus_node['structure']
+
+    assert 'subtitles' in kwargs.keys(), "No subtitles provided in config"
+
+    structure['subs_titles'] = [k.strip().title() for k in kwargs['subtitles']]
+    mome.update_section(focus_node['path'], "Section structure", momeutils.j_deco(structure))
+    save_config(config, config_path)
 
 def expand_initial_contents(config_path = None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -1940,24 +1966,31 @@ def find_next_level_structure(report_structure, hierarchy):
     next_level_structure = report_structure
 
     for level in hierarchy[1:]: 
-        # print(level, tmp_key_formatting(level))
+        # momeutils.crline("Target level - Level {} - Formatted: {}".format(level, tmp_key_formatting(level)))
         if isinstance(next_level_structure, dict):
+            # momeutils.crline('Looking for dict {}'.format(tmp_key_formatting(level)))   
             for k in next_level_structure.keys():
+                # print('Checking key {}'.format(k))
                 if k.lower() == tmp_key_formatting(level):
                     next_level_structure = next_level_structure[k]
-                    # print('Found {}'.format(k))
-                    # print('Structure:\n{}'.format(next_level_structure))
+                    # momeutils.crline('Found dict {} - Next structure {}\n Structure type :{} \n\n'.format(k, json.dumps(next_level_structure, indent = 4), type(next_level_structure)))
+                    # momeutils.crline('Structure:\n{}'.format(next_level_structure))
                     break
         elif isinstance(next_level_structure, list):
+            # momeutils.crline('Looking for list {}'.format(tmp_key_formatting(level)))
             for i, v in enumerate(next_level_structure):
+                # print('Checking list id : {} - Value : {}'.format(i, v))
                 str_v = v if isinstance(v, str) else list(v.keys())[0]
                 if str_v.lower() == tmp_key_formatting(level):
+                    # momeutils.dj(next_level_structure)
                     next_level_structure = next_level_structure[i]
-                    # print('Found {}'.format(str_v))
-                    # print('Structure:\n{}'.format(next_level_structure))
+                    if isinstance(next_level_structure, dict):
+                        next_level_structure = list(next_level_structure.values())[0]
+                    # momeutils.crline('Found list {} - Next structure {}\n Structure type :{} \n\n'.format(str_v, json.dumps(next_level_structure, indent = 4), type(next_level_structure)))
+                    # momeutils.crline('Structure:\n{}'.format(next_level_structure))
                     break                   
     
-
+    # momeutils.dj(next_level_structure)
     children = []
     if isinstance(next_level_structure, dict):
         next_level_structure = list(next_level_structure.values())[0]
@@ -1986,6 +2019,7 @@ def structure_propagation(config_path = None, **kwargs):
     focus_node = get_focus_node(config)
     hierarchy = collect_hierarchy_to_focus_node(config)
 
+    # momeutils.dj(hierarchy)
     # momeutils.dj(focus_node['control'])
     
     subs_titles_syntax_check(focus_node)  
@@ -1995,7 +2029,8 @@ def structure_propagation(config_path = None, **kwargs):
         next_level_structure = list(config['report_structure'].keys())
     else: 
         next_level_structure = find_next_level_structure(config['report_structure'], hierarchy)
-
+    # momeutils.dj(config['report_structure'])
+    # momeutils.dj(next_level_structure)
 
     if next_level_structure != focus_node['structure']['subs_titles']: # if the user has updated something 
          
@@ -2017,7 +2052,9 @@ def structure_propagation(config_path = None, **kwargs):
 
         # momeutils.dj({'to_change': to_change, 
         #               'to_add': to_add, 
-        #               "to_remove": to_remove})
+        #               "to_remove": to_remove, 
+        #               "focus_node": focus_node['structure']['subs_titles'],
+        #               "focus_path": focus_node['path']})
         
         current_control_center = focus_node['control']
         # momeutils.dj(current_control_center)
