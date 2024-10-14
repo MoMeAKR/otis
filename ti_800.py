@@ -320,9 +320,9 @@ Answer in a JSON format as follows:
     }} 
     ```
     """},
-        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n High-level layout\n{}\n\nUse the provided layout template to produce a well-structured and coherent text under the key 'contents'. To prevent formatting issues, use '\\n' in your answer to represent line breaks \n\n. Everything must be written in **french**. Tout doit être rédigé en français.".format(icl_examples, "\n* ".join([''] + paragraph_template))}
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n High-level layout\n{}\n\nUse the provided layout template to produce a well-structured and coherent text under the key 'contents'. To prevent formatting issues, use '\\n' in your answer to represent line breaks \n\n. ".format(icl_examples, "\n* ".join([''] + paragraph_template))}
     ]
-
+    # Everything must be written in **french**. Tout doit être rédigé en français.
     parseable = False
     while not parseable: 
         initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
@@ -420,6 +420,7 @@ def init_config_file(config_path):
             "title": "T-800: From the Future",
             "template": os.path.join(os.path.dirname(__file__), '.latex_template.txt')
         }, 
+        "eval_follow_up_threshold": 5,
         "eval_type": None,
         "eval_results": {}
     }
@@ -1177,6 +1178,16 @@ def find_parent_path(flat_hierarchy, target_name):
             return path
     return None
 
+def find_neighbors(config, node_name, hierarchy = None):
+
+    parent = find_parent(config, node_name, hierarchy)
+    if parent is None:
+        return []
+    hierarchy =mome.collect_dynasty_paths(parent, include_root=True, preserve_hierarchy=True)
+    neighbors = [[i, momeutils.bn(c['path'])] for i, c in enumerate(hierarchy['children']) if momeutils.bn(c['path']) != node_name]
+    return neighbors
+
+
 
 # def flatten_hierarchy_and_find_path(current_dynasty, parent_result):
 #     """
@@ -1225,7 +1236,8 @@ def check_missing_children(config_path=None, **kwargs):
     momeutils.crline('Missing: \n\n{}'.format(
         json.dumps(missing_results, indent=4)
     ))
-
+    
+    
     collected_parents = []
     for k in missing_results:
         parent_path = find_parent(config, k, None) #missing_results[k]['hierarchy'])
@@ -1237,83 +1249,6 @@ def check_missing_children(config_path=None, **kwargs):
     momeutils.dj(collected_parents)
 
 
-
-# def check_missing_children(config_path = None, **kwargs): 
-    
-#     config = load_config(config_path, **kwargs)
-#     focus_node = get_focus_node(config)
-    
-#     if is_leaf(focus_node['path']):
-#         # TO BE UPDATED 
-#         # return
-#         all_leaves = [focus_node['path']]
-#     else:     
-#         all_leaves = mome.collect_leaf_paths(focus_node['path']) 
-
-#     missing_results = {}
-#     for leaf in all_leaves: 
-#         name = momeutils.bn(leaf).split('_')[-2]
-#         if name == "ToFill" or get_control_center(leaf)['content'] == None:
-#             leaf_hierarchy = collect_hierarchy_to_children(config, momeutils.bn(leaf))
-
-#             missing_results[momeutils.bn(leaf)] = {"status": "empty", 
-#                                      "hierarchy": leaf_hierarchy}
-    
-#     momeutils.crline('Missing: \n\n{}'.format(
-#         json.dumps(missing_results, indent = 4)
-#     ))
-
-#     # # processing missing results
-#     collected_parents = []
-#     for k in missing_results: 
-#         lvl, part, name, hash_ = split_node_for_info(k)
-
-#         # ====================================
-#         # HEROIC ATTEMPT TO FIND THE PARENT
-#         for i in range(10): 
-#             parent_name = missing_results[k]['hierarchy'][-2]  
-#             # momeutils.crline('Lookding for parent {} - lvl {} - part {}'.format(parent_name, lvl-1, i))
-#             # momeutils.dj(config['report_structure'])
-#             parent_result = find_node_in_structure(config['report_structure'], lvl-1, i, tmp_key_formatting(parent_name, up_= True).strip(), current_lvl = -1)
-#             if parent_result is not None: 
-#                 # print('Found parent')
-#                 break
-        
-#         # momeutils.crline('Parent result {}'.format(parent_result))
-
-#         root_path = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
-#         current_dynasty = format_dynasty(mome.collect_dynasty_paths(root_path, include_root=True, preserve_hierarchy=True))['children']
-#         for cd in current_dynasty: 
-#             if cd['name'] == parent_result[0]: 
-#                 current_dynasty = cd 
-#                 break 
-
-#         if len(parent_result) == 1: 
-#             collected_path = os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
-#         else:
-#             collected_path = None
-#             for pr in parent_result[1:]: 
-#                 if isinstance(pr, int): 
-#                     current_dynasty = current_dynasty['children'][pr]
-#                 elif isinstance(pr, str): 
-#                     if current_dynasty['name'] == pr: 
-#                         # input('valid condition')
-#                         collected_path = os.path.join(config['interactive_graph_path'], current_dynasty['path'] + '.md')
-#                         break 
-#                     # input(current_dynasty)
-#                     target_idx = [i for i, c in enumerate(current_dynasty['children']) if c['name'] == pr][0]
-#                     current_dynasty = current_dynasty['children'][target_idx]
-#             # ====================================
-#         collected_parents.append([momeutils.bn(collected_path), momeutils.bn(k)])
-#         parent_controls = get_control_center(collected_path)
-#         parent_structure = get_section_structure(collected_path)
-
-#         # momeutils.crline('Figure out some helpful logic here' * 15)
-    
-#     # SHOULD FIGURE OUT SOME LOGIC TO HELP THE USER FILL IN THE MISSING PARTS
-    
-#     momeutils.dj(collected_parents)
-
 def update_report_structure_from_graph(config_path= None, **kwargs): 
     config = load_config(config_path, **kwargs)
     root = os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
@@ -1321,6 +1256,30 @@ def update_report_structure_from_graph(config_path= None, **kwargs):
     
     raise NotImplementedError('Not implemented yet')
 
+
+def eval_follow_up(config_path = None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    eval_type = config['eval_type']
+    if not eval_type in config['eval_results'].keys():
+        momeutils.crline('No evaluation results to follow up on')
+        return 
+
+    # Collecting nodes with low evaluation results
+    targets = [t for t in config['eval_results'][eval_type].keys() if config['eval_results'][eval_type][t] < config['eval_follow_up_threshold']]
+    if len(targets) == 0:
+        momeutils.crline('All set')
+        return
+
+    for t in targets:
+        momeutils.crline("Need to compose a helpful workflow to handle the following: \n{}".format(json.dumps({"Target": t, 
+                      "Result": config['eval_results'][eval_type][t], 
+                      "Control": get_control_center(os.path.join(config['interactive_graph_path'], t + ".md")), 
+                      "parent": find_parent(config, t, None), 
+                      "neighbors": find_neighbors(config, t, None)}, indent = 4)))
+    
+    
+    
 
 def run_eval(config_path= None, **kwargs):
 
@@ -1568,11 +1527,18 @@ def expand_initial_contents(config_path = None, **kwargs):
     config = load_config(config_path, **kwargs)
     focus_node = get_focus_node(config)
     control_center = focus_node['control']
-    structure = focus_node['structure']
 
-    control_center_contents = {k: v['user_instruction'] for k,v in control_center.items()}
-    structure['initial_contents'] = "\n\n".join(["{}: {}".format(k,v) for k,v in control_center_contents.items()])
-    mome.update_section(focus_node['path'], "Section structure", momeutils.j_deco(structure))
+
+    if is_leaf(focus_node['path']):
+        target_content = control_center['content']
+        structure = {"initial_contents": target_content} 
+    
+    else: 
+        structure = focus_node['structure']
+
+        control_center_contents = {k: v['user_instruction'] for k,v in control_center.items()}
+        structure['initial_contents'] = "\n\n".join(["{}: {}".format(k,v) for k,v in control_center_contents.items()])
+        mome.update_section(focus_node['path'], "Section structure", momeutils.j_deco(structure))
 
     # # PROPAGATION
 
@@ -1657,23 +1623,34 @@ def enhance_control_key(config_path=None, **kwargs):
     control_contents = config['control_contents']
     
     focus_node = get_focus_node(config)
-    section_structure = focus_node['structure'] 
+    
     control_center = focus_node['control']
 
+    if is_leaf(focus_node['path']):
+        key_id= 'content'
+        # TMP ! SHOULD HAVE SPECIALIZED AGENT
+        out = enhance_section_content("",
+                                      "", 
+                                      split_node_for_info(focus_node['path'])[2],
+                                      control_center[key_id],
+                                     control_contents 
+        )
+        control_center[key_id] = out
+    else: 
+        section_structure = focus_node['structure'] 
+        # Find the key that starts with the control_key
+        key_id = check_matching_key(control_center, control_key)
 
-    # Find the key that starts with the control_key
-    key_id = check_matching_key(control_center, control_key)
-
-    # p = "Initial complete content before split: {}\n\nTarget section: {}\n\nInitial content assigned to section: {}\n\nUser request: {}\n\nEnhance the Initial content assigned to section taking into account the global context and with particular attention to the user request.".format(section_structure['initial_contents'],
-    #                                                  control_key, control_center[key_id], control_contents)
-    # # out = momeutils.basic_task(p, model = "g4o")
-    # def enhance_section_content(high_level_text = None, section_names = None, target_section = None, initial_section_content = None, user_instruction = None): 
-    out = enhance_section_content(section_structure['initial_contents'], 
-                                  "\n".join([""] + section_structure['subs_titles']), 
-                                  key_id,
-                                 control_center[key_id]['user_instruction'], 
-                                 control_contents)
-    control_center[key_id]['user_instruction'] = out
+        # p = "Initial complete content before split: {}\n\nTarget section: {}\n\nInitial content assigned to section: {}\n\nUser request: {}\n\nEnhance the Initial content assigned to section taking into account the global context and with particular attention to the user request.".format(section_structure['initial_contents'],
+        #                                                  control_key, control_center[key_id], control_contents)
+        # # out = momeutils.basic_task(p, model = "g4o")
+        # def enhance_section_content(high_level_text = None, section_names = None, target_section = None, initial_section_content = None, user_instruction = None): 
+        out = enhance_section_content(section_structure['initial_contents'], 
+                                    "\n".join([""] + section_structure['subs_titles']), 
+                                    key_id,
+                                    control_center[key_id]['user_instruction'], 
+                                    control_contents)
+        control_center[key_id]['user_instruction'] = out
     mome.update_section(focus_node['path'], "Control center", momeutils.j_deco(control_center))
     save_config(config, config_path)   
 
@@ -1716,13 +1693,28 @@ def compile(config_path=None, **kwargs):
         to_compile = collect_all_compilable_children(focus_node_path)
 
     # RUNNING THE ACTUAL COMPILATION
+    # SEQUENTIAL COMPILATION
+    # compilation_results = {}
+    # for c in to_compile:
+    #     lvl, part, name, hash_ = split_node_for_info(c)
+    #     current_result = compile_node(c, strategy = "neighbors", config = config)
+    #     compilation_results[name] = current_result
+    #     compilation_results[name]['lvl'] = lvl
+    #     compilation_results[name]['part'] = part
+    #     compilation_results[name]['name'] = name
+    #     compilation_results[name]['hash'] = hash_
+
+    # momeutils.dj(compilation_results)
+
+
+
     # print('You forgot to uncomment'.upper()*20)
     # compilation_results = json.load(open('tmp.json'))
     compilation_results = {}
 
     # PARALLELIZING THE COMPILATION
     func_arg_list = [
-        (compile_node, (c,)) for c in to_compile
+        (compile_node, (c, "Control center", "neighbors", config)) for c in to_compile
     ]
     parallel_results = momeutils.mapper(func_arg_list)
     
@@ -1737,21 +1729,6 @@ def compile(config_path=None, **kwargs):
         compilation_results[name]['part'] = part
         compilation_results[name]['name'] = name
         compilation_results[name]['hash'] = hash_
-
-    # for i, c in enumerate(to_compile): 
-
-    #     # COMPILE RETURNS A DICT
-    #     current_result = compile_node(c)
-    #     # result_key = os.path.basename(c).split('.')[0].split('_')[-2]
-    #     # lvl = int(os.path.basename(c).split('.')[0].split('_')[0].replace('lvl', ''))
-    #     # part = int(os.path.basename(c).split('.')[0].split('_')[1].replace('part', ''))
-    #     lvl, part, name, hash_ = split_node_for_info(c)
-    #     # ADDING A KEY TO KEEP TRACK OF THE LEVEL OF THE NODE (SECTION, SUBSECTION, SUBSUBSECTION...)
-    #     compilation_results[name] = current_result
-    #     compilation_results[name]['lvl'] = lvl
-    #     compilation_results[name]['part'] = part
-    #     compilation_results[name]['name'] = name
-    #     compilation_results[name]['hash'] = hash_   
 
     with open('tmp.json', 'w') as f:    
         json.dump(compilation_results, f, indent = 4)
@@ -1918,20 +1895,48 @@ def fill_section_template(current_result, only_section = False):
     return template.replace('section_type', section_type).replace('ZENAME', current_result['name']).replace('ZEPART', str(current_result['part'])).replace('ZERESULT', current_result['result'])
 
 
-def compile_node(c, target_section = "Control center"): 
-    paragraph_controls = momeutils.parse_json(mome.get_node_section(c, target_section))
-    if paragraph_controls['content'] is None: 
-        return {'compiled': False, 'result': 'No content to compile for {}'.format(momeutils.bn(c).split('_')[-2])}
+def compile_node(c, target_section = "Control center", strategy = "base", config = None): 
     
-    paragraph_reprez = {k:v for (k, v) in paragraph_controls.items() if (k != "nb_paragraphs" and v is not None)}
-    paragraph_reprez = json.dumps(paragraph_reprez, indent = 4)
-    test = generate_paragraph_subcontents(paragraph_reprez, paragraph_controls['nb_paragraphs'])
-    # test= ["hello", "my", "name"]
-    s = "\n\n* Paragraph ".join([''] + [str(i) + f": {t}" for i, t in enumerate(test)])
-    p ="As an expert AI writer, you are provided with a high-level view of some paragraph contents. Based on the information, generate the text for each paragraph: {}".format(s)
-    result = paragraph_writer2(test)
-    # result = momeutils.basic_task(p)
-    # result = paragraph_writer_enhanced(json.dumps(paragraph_controls, indent = 4))
+    if strategy == "base":
+        paragraph_controls = momeutils.parse_json(mome.get_node_section(c, target_section))
+        if paragraph_controls['content'] is None: 
+            return {'compiled': False, 'result': 'No content to compile for {}'.format(momeutils.bn(c).split('_')[-2])}
+        
+        paragraph_reprez = {k:v for (k, v) in paragraph_controls.items() if (k != "nb_paragraphs" and v is not None)}
+        paragraph_reprez = json.dumps(paragraph_reprez, indent = 4)
+        test = generate_paragraph_subcontents(paragraph_reprez, paragraph_controls['nb_paragraphs'])
+
+        result = paragraph_writer2(test)
+    elif strategy == "neighbors": 
+
+        lvl, part, name, _ = split_node_for_info(c)
+        target_control = momeutils.parse_json(mome.get_node_section(c, target_section))
+        neighbors = find_neighbors(config, momeutils.bn(c))
+        neighborhood = []
+        for i in range(len(neighbors)+1): 
+            if i == part: 
+                contents = {"Current paragraph": name, 
+                            "Position": i,
+                            "Controls": momeutils.parse_json(mome.get_node_section(c, target_section))}
+            else: 
+                target_node = [n for n in neighbors if n[0] == i][0][1]
+                
+                n_lvl, n_part, n_name, _ = split_node_for_info(target_node)
+                n_path = os.path.join(config['interactive_graph_path'], target_node + ".md")
+                controls = momeutils.parse_json(mome.get_node_section(n_path, target_section))
+
+                contents = {"Neighbor section": n_name, 
+                            "Position": "Current section + {}".format(n_part),
+                            "Controls": controls['content']}
+                
+            neighborhood.append(contents)
+        neighborhood.append('Again, to reiterate, the current paragraph to focus on is {} at position {}. Your answer must only develop this part, the rest is provided as context to avoid reintroduce already existing concepts and ensure smooth transitions between topics.'.format(tmp_key_formatting(name, up_ = True), part))
+        control_archi = generate_paragraph_subcontents(neighborhood, target_control['nb_paragraphs'])
+        result = paragraph_writer2(control_archi)
+
+        # momeutils.dj({"Neigh": neighborhood, 
+        # "archi": control_archi, 
+        # "result": result})
 
     mome.update_section(c, "Results", result)
     return {'compiled': True, 'result': result}
