@@ -1,15 +1,173 @@
 
-import mome
-import inspect
 import shutil
-import momeutils
-import os
 import copy
+import mome
 import subprocess
-import json
+import inspect
 import re
+import os
+import json
 import glob
+from docx import Document
+import momeutils
 
+
+def enhance_report_section(section_identifier = None, current_contents = None, initial_global_contents = None, subsection_titles = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are a content enhancement specialist with expertise in report writing. Your task is to enhance the {target} subsection of a report using provided the initial overview of the contents of the parent section and the existing subsection content..
+    You will receive the global contents, the list of titles for the subsections within the section (to help you trim and focus on the key part) and the current contents of the subsection. Your goal is to rewrite and enhance the content for the {target} subsection.
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+        "enhanced_section_contents" : "The enhanced contents of the {target} subsection after processing."
+    
+    }} 
+    ```
+    """.format(target = section_identifier)}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Current Global Contents\n{}\n\n Existing Subsections: {}\n\n Initial Subsection Contents\n{}\n\nEnhance the {} subsection using the provided information.\n\n".format(icl_examples, initial_global_contents, subsection_titles, current_contents, section_identifier)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["enhanced_section_contents"]
+
+
+def rate_key_concepts_relatedness(initial_content = None, subsections = None, target_subsection = None, current_extracted_text = None,key_concepts = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are a content analysis expert, specializing in evaluating the relatedness of key concepts to specific subsections of text. Your task is to analyze a provided text, identify its subsections, and then rate the relatedness of each extracted key concept to the ** {subs} ** subsection. You will receive the following inputs:
+    
+    * **Initial Text:** The full text to be analyzed.
+    * **Subsections:** A list of all subsections identified within the text to enhance contex awareness and ground rating.
+    * **Target Subsection Text:** The text content of the target subsection.
+    * **Key Concepts:** A list of key concepts extracted from the text.
+             
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+      
+        {scores}
+        
+    
+    }} 
+    ```
+    """.format(subs = target_subsection,
+               scores = ",\n".join(['"{}" : int score'.format(kc.lower().replace(' ', '_')) for kc in key_concepts]))},
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Initial Content\n{}\n\n Subsections\n{}\n\n Current Extracted Text\n{} Key Concepts\n{}\n\n\n\nEvaluate and rate the relatedness of the provided key concepts to the ** {} ** subsection.\n\n".format(icl_examples, initial_content, subsections, current_extracted_text, key_concepts, target_subsection)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results
+
+
+def extract_key_concepts(text = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are a content summarizer with expertise in identifying key concepts. Your task is to extract the most important ideas from a given text and present them as a list. Focus on identifying the core themes and central arguments, avoiding unnecessary details or peripheral information.
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+        "key_concepts" : [
+            "key concept 0 " ,
+            "key concept 1" ,
+            // add more items as needed...
+        ] 
+     
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Text\n{}\n\nExtract key concepts or ideas from the provided text and return them in a list under the key 'key_concepts'.\n\n".format(icl_examples, text)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["key_concepts"]
+
+def extract_complementary_info_concepts(text = None, key_concepts = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are a content summarizer with strong and robust expertise. Your task is to extract complementary information from a given text and present them as a list. 
+    Specifically, you'll be provided with some initial content, the key concepts previously extracted and you must focus on identifying names, context, acronyms, methods, strategy or paradigms (only when applicable, if there are none, do not add) that are to be preserved and passed through to next sections so downstream consistency can be ensured. 
+    Avoid trivial or redundant information, focusing on elements that are crucial for maintaining coherence and understanding.
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+        "complementary_information": [
+             // names, strategy, acronyms, methods, paradigms... that might be lost downstream, make sure each item contains enough rationale to be understood in later stages
+             ]
+    
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Text\n{}\n\nExtracted key concepts\n {}\n\n Extract the remaining complementary information from the provided text that will be central in ensuring consistency and return them in a list under the key 'complementary_information'.\n\n".format(icl_examples, text, key_concepts)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["complementary_information"]
+
+
+
+def adjust_text_based_on_review(initial_text = None, reviews = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are a text editor with expertise in refining written content based on user feedback. Your task is to modify the initial text based on user feedback. You will receive the original text and user feedback, and your output will be the adjusted text incorporating the feedback.
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+        "reviewed" : "The adjusted text based on the user input and initial piece of text."
+    
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Initial Text\n{}\n\n User reviews\n{}\n\nAdjust the initial text according to the user review provided.\n\n".format(icl_examples, initial_text, reviews)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["reviewed"]
 
 def evaluate_parameter_relevance(text_content = None, user_example = None): 
     
@@ -108,17 +266,6 @@ def identify_missing_elements_for_consistency(initial_content = None, subsection
     messages = [
             {"role": "system", "content": """
     You are a text analysis expert assisting the user in identifying missing elements within a subsection of a larger text to ensure downstream consistency. You will be provided with the initial text, its subsections, a target subsection, and the currently extracted text for that subsection. Your task is to analyze these elements and determine what information is missing for the target subsection to ensure consistency. 
-    Specifically, you will receive:
-    - The initial piece of text.
-    - A list of subsections related to the initial content.
-    - The specific subsection that is the focus of the agent's analysis.
-    - The text currently extracted that outlines the target subsection.
-    You should return:
-    - The initial piece of text provided to the agent.
-    - A list of subsections related to the initial content.
-    - The specific subsection that is the focus of the agent's analysis.
-    - The text currently extracted that outlines the target subsection.
-    - The missing elements identified by the agent to ensure downstream consistency.
     Answer in a valid JSON format as follows:
     ```json
     {{
@@ -312,7 +459,7 @@ def paragraph_writer2(paragraph_template = None):
 
     messages = [
             {"role": "system", "content": """
-You are a writing assistant with expertise in producing well-structured and coherent contents. You are expected to use the provided high-level layout and generate clear, well-structured and convincing text. 
+You are a writing assistant with expertise in producing well-structured and coherent contents. You are expected to use the provided high-level layout and generate clear, well-structured and neutral sounding text for a research evaluation by an external auditing institution. 
 Answer in a JSON format as follows:
     ```json
     {{
@@ -396,7 +543,7 @@ Answer in a **valid** JSON format as follows:
     return  results
 
 
-def init_config_file(config_path): 
+def init_config_file(config_path, **kwargs): 
     config = {
         "base_knowledge_path": os.path.join(os.path.dirname(__file__), 'sample_ainimals.txt'),
         "current_hash": None,
@@ -411,6 +558,7 @@ def init_config_file(config_path):
         "report_path": os.path.join(os.path.dirname(__file__), 'reports'),
         "control_key": None, 
         "control_contents": "", 
+        "review_contents": "",
         "inadequate_contents": None, 
         "non_filled": None, 
         "paragraph_parameter": None, 
@@ -424,6 +572,10 @@ def init_config_file(config_path):
         "eval_type": None,
         "eval_results": {}
     }
+
+    for k,v in kwargs.items():
+        if k in config.keys():
+            config[k] = v
 
     with open(config_path, 'w') as f:
         json.dump(config, f, indent = 4)
@@ -631,14 +783,18 @@ def create_nodes_recursively(root_hash, graph_folder, structure, parent_path=Non
             # Handle other cases if necessary
             pass
 
-def reset_config(config_path = None):
+def reset_config(config_path = None, **kwargs):
     if os.path.exists(config_path):
         os.remove(config_path)
-    init_config_file(config_path)
+    init_config_file(config_path, **kwargs)
 
+def get_current_config(config_path = None, **kwargs):
+    return momeutils.dj(load_config(config_path, **kwargs), do_break = False)
 
 def define_structure(config, text_contents, user_instruction = None):
 
+    if not os.path.exists(os.path.dirname(config['tmp_structure_file'])):
+        os.makedirs(os.path.dirname(config['tmp_structure_file']))
 
     current_structure = outline_report(text_contents)
     with open(config['tmp_structure_file'], 'w') as f:
@@ -709,7 +865,7 @@ def convert_structure(data):
 
 
 def initialize_graph_from_text(config_path=None, **kwargs):
-    config = init_config_file(config_path)
+    config = init_config_file(config_path, **kwargs)
 
     text_contents = open(kwargs.get('text_contents', None)).read()
     config['tmp_init_text'] = kwargs.get('text_contents', None)
@@ -1087,10 +1243,14 @@ def find_parent(config, node_name, hierarchy = None):
     :return: The path of the parent node if found, otherwise None.
     """
     lvl, part, name, hash_ = split_node_for_info(node_name)
-
+    if lvl == 0: 
+        return os.path.join(config['interactive_graph_path'], config['current_hash'] + ".md")
+    
+    
     if hierarchy is None:
         hierarchy = collect_hierarchy_to_children(config, node_name)
 
+    momeutils.dj(hierarchy)
     parent_result = None
     for i in range(10):
         parent_name = hierarchy[-2]
@@ -1256,6 +1416,26 @@ def update_report_structure_from_graph(config_path= None, **kwargs):
     
     raise NotImplementedError('Not implemented yet')
 
+def manual_control_key_change(config_path = None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    control_key = config['control_key']
+    instructions = config['user_instruction']
+    focus_node = get_focus_node(config)
+    # get all compilable children
+    targets = find_compilable_from_focus(focus_node['path'])
+
+    for t in targets:
+        control_center = momeutils.parse_json(get_control_center(t))
+
+        if not control_key in control_center.keys():
+            momeutils.crline('Control key {} not found in {}'.format(control_key, momeutils.bn(t)))
+            continue
+        control_center[control_key] = instructions
+        # for k in control_center.keys():
+        #     control_center[k]['template'] = momeutils.uinput('New template for {}'.format(k))
+        mome.update_section(t, 'Control center', momeutils.j_deco(control_center)) 
+
+    save_config(config, config_path)
 
 def eval_follow_up(config_path = None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -1279,7 +1459,11 @@ def eval_follow_up(config_path = None, **kwargs):
                       "neighbors": find_neighbors(config, t, None)}, indent = 4)))
     
     
-    
+def find_compilable_from_focus(focus_node_path):
+    if is_leaf(focus_node_path):
+        return [focus_node_path]
+    else:
+        return collect_all_compilable_children(focus_node_path) 
 
 def run_eval(config_path= None, **kwargs):
 
@@ -1290,10 +1474,11 @@ def run_eval(config_path= None, **kwargs):
     eval_type = config['eval_type']
     
     # Collecting target nodes
-    if is_leaf(focus_node['path']): 
-        targets = [focus_node['path']]
-    else: 
-        targets = collect_all_compilable_children(focus_node['path'])
+    # if is_leaf(focus_node['path']): 
+    #     targets = [focus_node['path']]
+    # else: 
+    #     targets = collect_all_compilable_children(focus_node['path'])
+    targets = find_compilable_from_focus(focus_node['path'])
     
     if eval_type == "xps": 
         eval_func = tmp_xps_eval
@@ -1321,6 +1506,24 @@ def get_structure_children(node_path, config= None):
     
     structure = get_section_structure(node_path)
     return structure['subs_titles']
+
+def pull_details(config_path = None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    # control_center = focus_node['control']
+    # structure = focus_node['structure']
+
+    node_parent= find_parent(config, momeutils.bn(focus_node['path']))
+    lvl, part, name, hash_ = split_node_for_info(focus_node['path'])
+    parent_controls = get_control_center(node_parent)
+    details = parent_controls[list(parent_controls.keys())[part]]['additional_details']
+    consistency_elements = parent_controls[list(parent_controls.keys())[part]]['consistency_elements']
+
+    out = momeutils.unconstrained_task("We are writing a report and focusing on the section '{}'. The following details were provided by the parent section {}: \n\n{}\n\nRate (0-10) the relevance of each piece of detail so we can identify the most relevant to include downstream.".format(name, 
+                                                                                                                                                                                                                                                                                        split_node_for_info(momeutils.bn(node_parent))[-2],
+                                                                                                                                                                                                                                                                                        details))
+
+    momeutils.dj(out)
 
 def look_ahead(config_path = None, **kwargs):
 
@@ -1404,7 +1607,33 @@ def run_look_ahead(config, focus_node, key, target_node):
     
 #     mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(control_center))
 
-        
+def run_test(config_path = None, **kwargs): 
+    config = load_config(config_path, **kwargs)
+    focus_node= get_focus_node(config)
+
+    key_concepts = extract_key_concepts(focus_node['structure']['initial_contents'])
+    complementary_info = extract_complementary_info_concepts(focus_node['structure']['initial_contents'], key_concepts)
+
+    
+    
+    # testing consistentcy 
+    # results = simple_extract(sample_text = focus_node['structure']['initial_contents'],
+    #                             sections = focus_node['structure']['subs_titles'])
+    results = momeutils.parse_json(focus_node['control'])
+
+    for k in results.keys():
+
+        relatedness = rate_key_concepts_relatedness(focus_node['structure']['initial_contents'], 
+                                                focus_node['structure']['subs_titles'], 
+                                                k,
+                                                results[k], 
+                                                key_concepts)
+        momeutils.dj(relatedness)
+        # key_concepts = identify_missing_elements_for_consistency(focus_node['structure']['initial_contents'], 
+        #                                                          focus_node['structure']['subs_titles'], 
+        #                                                          k, results[k])
+        # momeutils.uinput("")
+
   
 def pour_info(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
@@ -1432,31 +1661,49 @@ def pour_info(config_path=None, **kwargs):
     leftovers = []
     results = simple_extract(sample_text = section_structure['initial_contents'], 
                              sections = section_structure['subs_titles'],)
+
+    
+    # Fillings for consistency and additional info
+    key_concepts = extract_key_concepts(section_structure['initial_contents'])
+    complementary_info = extract_complementary_info_concepts(section_structure['initial_contents'], key_concepts)
+    
     for i, (k,v) in enumerate(results.items()):
         if v is None or v.strip().lower() == "null": 
             leftovers.append(k)
         control_center[list(control_center.keys())[i]]['user_instruction'] = v
     
     pour_info_params = [
-        (run_pour_info, (config, control_center, section_structure, leftovers, key, results)) for key in control_center.keys()
+        (run_pour_info, (config, control_center, section_structure, leftovers, key, results[key_r], key_concepts, complementary_info)) for key, key_r in zip(control_center.keys(), results.keys())
     ]
     parallel_results = momeutils.mapper(pour_info_params)   
 
     for i, (p, k)  in enumerate(zip(parallel_results, control_center.keys())): 
-        control_center[k][p[0]] = p[1]
+        for kk in p.keys(): 
+            control_center[k][kk] = p[kk]
+        # control_center[k][p[0]] = p[1]
 
     mome.update_section(focus_node_path, "Control center", momeutils.j_deco(control_center))
     save_config(config, config_path)
     return leftovers
 
-def run_pour_info(config, control_center, section_structure, leftovers, key, results):
+def run_pour_info(config, control_center, section_structure, leftovers, key, results, key_concepts = None, complementary_info = None):
 
     if key in leftovers: 
         result = "Some model suggestion"
         return ["model_suggestion", result]
     else: 
-        result = "Check consistency " #identify_missing_elements_for_consistency(section_structure['initial_contents'], section_structure['subs_titles'], key, control_center[key]['user_instruction'])
-        return ["consistency_elements", result]
+        if key_concepts is not None:
+            ratings= rate_key_concepts_relatedness(section_structure['initial_contents'], section_structure['subs_titles'], key, results, key_concepts)
+            result = [key_concepts[i] for i,(k,v) in enumerate(ratings.items()) if v > 4]
+        else: 
+            result = "Check consistency " #identify_missing_elements_for_consistency(section_structure['initial_contents'], section_structure['subs_titles'], key, control_center[key]['user_instruction'])
+        
+        if complementary_info is not None: 
+            ci = complementary_info
+        else: 
+            ci = "Check additional info"
+        # return ["consistency_elements", result]
+        return {"consistency_elements": result, "additional_details": ci}
 
 
     # for i, (s,k) in enumerate(zip(section_structure['subs_titles'], results.keys())): 
@@ -1541,6 +1788,10 @@ def expand_initial_contents(config_path = None, **kwargs):
         mome.update_section(focus_node['path'], "Section structure", momeutils.j_deco(structure))
 
     # # PROPAGATION
+    if is_root(config, focus_node['path']):
+        momeutils.crline('Root node, no backprop')
+        save_config(config, config_path)
+        return
 
     hierarchy = collect_hierarchy_to_children(config, momeutils.bn(focus_node['path']), raw = True)
     _, _, name, _ = split_node_for_info(focus_node['path'])
@@ -1617,6 +1868,58 @@ def check_matching_key(control_center, control_key):
         raise ValueError(f"Control key {control_key} not found in control contents")
     return matching[0]
 
+def run_review(config_path = None, **kwargs):
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    review_contents = config['review_contents']
+    control_center = focus_node['control']
+
+    control_key = check_matching_key(control_center, config['control_key'])
+
+
+    if is_leaf(focus_node['path']): 
+        momeutils.crline('Is leaf node ! Process undefined')
+        return 
+    else: 
+        current_contents = control_center[control_key]['user_instruction']
+        out = adjust_text_based_on_review(current_contents, review_contents)
+        control_center[control_key]['user_instruction'] = out
+        mome.update_section(focus_node['path'], "Control center", momeutils.j_deco(control_center))
+        save_config(config, config_path)
+
+
+def refill(config_path = None, **kwargs): 
+
+    """
+    Refill is supposed to be used after a few sections have been filled and there is new 
+    and additional information in the initial_contents of a section structure. 
+    In this case, we might want to leverage those to enhance downstream sections.
+    """
+
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    
+    if is_leaf(focus_node['path']):
+        momeutils.crline('Leaf node, nothing to do')
+        return
+    
+    control_center = focus_node['control']  
+    key_id = check_matching_key(control_center, config['control_key'])
+    section_structure = focus_node['structure']
+    current_contents = control_center[key_id]['user_instruction']
+# def enhance_report_section(section_identifier = None, current_contents = None, initial_global_contents = None, subsection_titles = None): 
+    results = enhance_report_section(section_identifier = key_id, 
+                                    current_contents = current_contents,
+                                    initial_global_contents = section_structure['initial_contents'],
+                                    subsection_titles = section_structure['subs_titles'])
+    
+    # momeutils.unconstrained_task("In the process of writing a report, new information has been obtained and the contents of a given section should now be enhanced. In particular, we are focusing on section: {}\n Current contents for the section {}\n{}. As mentionned, user has enhanced the initial global contents with the following information: \n\n{}\n\nBased on this new information, rewrite/improve the current overview contents of the section to include relevant pieces of the new information (there are some other sections ({}) as well, so stick to the relevant aspects to avoid redundancy).".format(key_id, key_id, current_contents, section_structure['initial_contents'], " ,".join(section_structure['subs_titles'])), model = "g4o")
+    # input("ok  ? ")
+    control_center[key_id]['user_instruction'] = results
+    mome.update_section(focus_node['path'], "Control center", momeutils.j_deco(control_center))
+    save_config(config, config_path)
+
+
 def enhance_control_key(config_path=None, **kwargs):
     config = load_config(config_path, **kwargs)
     control_key = config['control_key']
@@ -1692,6 +1995,7 @@ def compile(config_path=None, **kwargs):
     else: 
         to_compile = collect_all_compilable_children(focus_node_path)
 
+    # momeutils.dj(to_compile)
     # RUNNING THE ACTUAL COMPILATION
     # SEQUENTIAL COMPILATION
     # compilation_results = {}
@@ -1730,12 +2034,13 @@ def compile(config_path=None, **kwargs):
         compilation_results[name]['name'] = name
         compilation_results[name]['hash'] = hash_
 
-    with open('tmp.json', 'w') as f:    
-        json.dump(compilation_results, f, indent = 4)
+    # with open('tmp.json', 'w') as f:    
+    #     json.dump(compilation_results, f, indent = 4)
 
     update_compilation_results(config, compilation_results)
     # input(' ok ')
     produce_latex(config)
+    produce_word(config)
     fill_obsidian(config, compilation_results)
 
 def produce_latex(config):
@@ -1771,6 +2076,52 @@ def produce_latex(config):
 
     # RUN COMPILATION 
     subprocess.run(['pdflatex','-interaction=nonstopmode' ,'-output-directory', config['report_path'], os.path.join(config['report_path'], 'report.tex')])
+
+
+
+def produce_word(config):
+    if not os.path.exists(config['report_path']):
+        os.makedirs(config['report_path'])
+    
+    contents = json.load(open(config['results_path']))['results']
+    document = Document()
+
+    def traverse_structure(structure, level):
+        if isinstance(structure, dict):
+            for key, value in structure.items():
+                if level == 0:
+                    document.add_heading(tmp_key_formatting(key, up_=True), level=1)
+                elif level == 1:
+                    document.add_heading(tmp_key_formatting(key, up_=True), level=2)
+                elif level == 2:
+                    document.add_heading(tmp_key_formatting(key, up_=True), level=3)
+                elif level == 3:
+                    document.add_heading(tmp_key_formatting(key, up_=True), level=4)
+                elif level == 4:
+                    document.add_heading(tmp_key_formatting(key, up_=True), level=5)
+                else:
+                    document.add_paragraph(key, style='BodyText')
+                
+                traverse_structure(value, level + 1)
+        elif isinstance(structure, list):
+            for item in structure:
+                traverse_structure(item, level)
+        elif isinstance(structure, str):
+            document.add_paragraph(structure)
+
+
+    # Add title and author
+    document.add_heading(config['report_details']['title'], level=0)
+    document.add_paragraph(f"Author: {config['report_details']['author']}")
+
+    traverse_structure(contents, 0)
+
+
+    # Save the document
+    document_path = os.path.join(config['report_path'], 'report.docx')
+    document.save(document_path)
+
+
 
 def find_node_in_structure(structure, lvl, part, name, current_lvl=0, current_part=0, path=[]):
         # CAREFUL ! THERE IS A VULNERABILITY IN FIND_NODE --> NODES THAT DIFFER ONLY BY THE HASH CAN BE MIXED UP 
@@ -1923,16 +2274,33 @@ def compile_node(c, target_section = "Control center", strategy = "base", config
                 
                 n_lvl, n_part, n_name, _ = split_node_for_info(target_node)
                 n_path = os.path.join(config['interactive_graph_path'], target_node + ".md")
-                controls = momeutils.parse_json(mome.get_node_section(n_path, target_section))
-
+                if is_leaf(n_path):
+                    controls = {"content": momeutils.parse_json(mome.get_node_section(n_path, target_section))}
+                    control_contents = controls['content']
+                else: 
+                    momeutils.crline('HERE {}\n'.format(n_path) * 10)
+                    controls = momeutils.parse_json(mome.get_node_section(n_path, target_section))
+                    # momeutils.dj(controls)
+                    # control_contents = "\n* ".join([["The neighbor section {} contains several subsections".format(tmp_key_formatting(n_name, up_ = True))] + ["{}: {}".format(tmp_key_formatting(k, up_ =True), v['user_instruction']) for k,v in controls.items()]])
+                    control_contents = "\n* ".join(
+                        ["The neighbor section {} contains several subsections".format(tmp_key_formatting(n_name, up_=True))] +
+                        ["{}: {}".format(tmp_key_formatting(k, up_=True), v['user_instruction']) for k, v in controls.items()]
+                    )
+                    # momeutils.crline(control_contents)
+                    # control_contents = controls[tmp_key_formatting(n_name, up_ = True)]['user_instruction']
+                    # print('OKAY for {}\n'.format(n_name)*10)
                 contents = {"Neighbor section": n_name, 
                             "Position": "Current section + {}".format(n_part),
-                            "Controls": controls['content']}
+                            "Controls": control_contents}
                 
             neighborhood.append(contents)
         neighborhood.append('Again, to reiterate, the current paragraph to focus on is {} at position {}. Your answer must only develop this part, the rest is provided as context to avoid reintroduce already existing concepts and ensure smooth transitions between topics.'.format(tmp_key_formatting(name, up_ = True), part))
         control_archi = generate_paragraph_subcontents(neighborhood, target_control['nb_paragraphs'])
-        result = paragraph_writer2(control_archi)
+        additional_guidance = "\n\nAdditional guidance: \n {}".format("\n * ".join([""] + ["{}: {}".format(k.upper(), target_control[k]) for k in ['specific_viewpoint', "examples", "visuals", "references"] if target_control[k] is not None])) if (target_control['examples'] is not None or target_control['specific_viewpoint'] is not None or target_control['references'] is not None) else ""
+        # momeutils.crline(additional_guidance)
+        control_archi_enhanced = "\n".join(["Structure", "\n".join(control_archi), additional_guidance])
+
+        result = paragraph_writer2([control_archi_enhanced])
 
         # momeutils.dj({"Neigh": neighborhood, 
         # "archi": control_archi, 
