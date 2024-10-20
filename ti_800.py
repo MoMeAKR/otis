@@ -1,15 +1,84 @@
 
-import shutil
-import copy
-import mome
-import subprocess
-import inspect
-import re
 import os
-import json
-import glob
-from docx import Document
+import re
 import momeutils
+import inspect
+import json
+import subprocess
+import copy
+import glob
+import shutil
+import mome
+from docx import Document
+
+
+
+def evaluate_detail_sim(parent_section_details = None, current_details = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are a content analysis expert, tasked with evaluating the similarity of details from a parent section with the existing current details, with the goal of keeping only relevant and informative elements. 
+    In this context, you will receive details from the parent section and the current details, and you will rate the similarity of each current detail to the parent section details on a scale from 0 to 10, where 0 indicates no similarity and 10 indicates high similarity. Your output should be a JSON object containing the similarity ratings for each detail.
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+        "similarity_ratings" : [
+            ["Short rationale explaining to which existing detail the parent detail 0 is most similar", int score (0-10) for detail 0], 
+            ["Short rationale explaining to which existing detail the parent detail 1 is most similar", int score for detail 1, ]  
+            ... // as many scores as there are parent detail items 
+        ]
+    
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Parent Section Details\n{}\n\n Current Details\n{}\n\nEvaluate the similarity of each detail from the parent section to the current details and rate them on a scale from 0 to 10.\n\n".format(icl_examples, parent_section_details, current_details)}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["similarity_ratings"]
+
+
+
+def evaluate_section_relevance(section_name = None, parent_section_details = None, current_details = None): 
+    
+    icl_examples = momeutils.load_icl(inspect.currentframe())
+    
+    
+    messages = [
+            {"role": "system", "content": """
+    You are a content analysis expert, tasked with evaluating the relevance of details from a parent section for a report. You will receive details from the parent section and rate their relevance on a scale from 0 to 10, where 0 is completely irrelevant and 10 is highly relevant. Your output should be a JSON object containing the relevance ratings for each piece of detail.
+    Answer in a valid JSON format as follows:
+    ```json
+    {{
+    
+        "relevance_ratings" : [
+            ["Short rationale explaining detail 0 score", int score (0-10) for detail 0], 
+            ["Short rationale explaining detail 1 score", int score for detail 1, ]
+            ... // as many scores as there are detail items 
+        ]
+    
+    }} 
+    ```
+    """}, 
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Section Name\n{}\n\n Parent Section Details\n{}\n\n{}Evaluate the relevance of each detail from the parent section for the report and rate them on a scale from 0 to 10 {}.\n\n".format(icl_examples, section_name, parent_section_details, 
+                                                                                                                                                                                                                                                                                                        "Current Details \n{}\n\n".format(current_details) if current_details else "",
+                                                                                                                                                                                                                                                                                                        "(if some current details are similar to some of the existing parent details, put their score to 0)" if current_details else "")}
+    ]
+    
+    # results = momeutils.parse_json(momeutils.ask_llm(messages, model = "g4o"))
+    parseable = False
+    while not parseable: 
+        initial_answer, parseable, results = momeutils.safe_llm_ask(messages, model = 'g4o') 
+    momeutils.crprint(json.dumps(results, indent = 4))
+    return results["relevance_ratings"]
 
 
 def enhance_report_section(section_identifier = None, current_contents = None, initial_global_contents = None, subsection_titles = None): 
@@ -530,7 +599,7 @@ Answer in a **valid** JSON format as follows:
     ```
     """.format(sections = "\n".join(['"{sectionf}": What could fill the **{section}** subsection, based on the provided context",'.format(sectionf = section.lower().strip().replace(' ', "_"), section = section) for section in sections]))}, 
      
-        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Root text (serving as a knowledge repository)\n{}\n\n Sections\n{}\n\nGiven the root text and a list of sections, sum up some elements from the root text that could serve as justifications or supporting information for our section of interest (feel free to rephase instead of simply copy pasting things out). Try and be accurate and mindful of other sections, that is, not all content must be used and if nothing relates to the current elements, please use null.\n\n".format(icl_examples, sample_text, sections)}
+        {"role": "user", "content": " {} For this particular task instance, the following elements are provided:\n Root text (serving as a knowledge repository)\n{}\n\n Sections\n{}\n\nGiven the root text and a list of sections, sum up some elements from the root text that could serve as justifications or supporting information for our section of interest (feel free to rephase instead of simply copy pasting things out). Try and be accurate and mindful of other sections, that is, not all content must be used and if nothing relates to the current elements, please use null. Format wise, present the section contents without referring explicitely to the root text (aka, avoid writing structures like 'The text discusses/states' \n\n".format(icl_examples, sample_text, sections)}
     ]
 
     # momeutils.dj(messages)
@@ -1250,7 +1319,6 @@ def find_parent(config, node_name, hierarchy = None):
     if hierarchy is None:
         hierarchy = collect_hierarchy_to_children(config, node_name)
 
-    momeutils.dj(hierarchy)
     parent_result = None
     for i in range(10):
         parent_name = hierarchy[-2]
@@ -1507,23 +1575,86 @@ def get_structure_children(node_path, config= None):
     structure = get_section_structure(node_path)
     return structure['subs_titles']
 
+def set_initial_contents(target_node, contents): 
+    if is_leaf(target_node): 
+        control_center = get_control_center(target_node)
+        control_center['content'] = contents
+        mome.update_section(target_node, 'Control center', momeutils.j_deco(control_center))
+    else:
+        section_structure = get_section_structure(target_node)
+        section_structure['initial_contents'] = contents
+        mome.update_section(target_node, 'Section structure', momeutils.j_deco(section_structure))
+
+
+def push_key(config_path = None, **kwargs): 
+
+    config = load_config(config_path, **kwargs)
+    focus_node = get_focus_node(config)
+    control_center = focus_node['control']
+    structure = focus_node['structure']
+    key = config['control_key']
+
+    # SELECTING A SINGLE CHILDREN FROM KEY 
+    key_id = check_matching_key(control_center, key)
+    key_pos= list(control_center.keys()).index(key_id)
+    links = mome.get_node_links(focus_node['path'])
+    target_children= links[key_pos]
+    
+    
+    # PROPAGATING SINGLE KEY 
+    set_initial_contents(os.path.join(config['interactive_graph_path'], target_children + ".md"), control_center[key_id]['user_instruction'])
+    
+    mome.change_active_node(os.path.dirname(focus_node['path']), target_children)
+    save_config(config, config_path)
+    # momeutils.dj('OK ? ?')
+    pour_info(config_path, **kwargs)
+    propagate(config_path, **kwargs)
+
+
+
 def pull_details(config_path = None, **kwargs):
     config = load_config(config_path, **kwargs)
     focus_node = get_focus_node(config)
-    # control_center = focus_node['control']
+    control_center = focus_node['control']
     # structure = focus_node['structure']
 
     node_parent= find_parent(config, momeutils.bn(focus_node['path']))
     lvl, part, name, hash_ = split_node_for_info(focus_node['path'])
     parent_controls = get_control_center(node_parent)
     details = parent_controls[list(parent_controls.keys())[part]]['additional_details']
-    consistency_elements = parent_controls[list(parent_controls.keys())[part]]['consistency_elements']
+    if is_leaf(focus_node['path']):
+        existing_details = control_center.get('additional_details', None)
+    else:
+        existing_details = control_center[list(control_center.keys())[0]].get('additional_details', None)
+    # consistency_elements = parent_controls[list(parent_controls.keys())[part]]['consistency_elements']
 
-    out = momeutils.unconstrained_task("We are writing a report and focusing on the section '{}'. The following details were provided by the parent section {}: \n\n{}\n\nRate (0-10) the relevance of each piece of detail so we can identify the most relevant to include downstream.".format(name, 
-                                                                                                                                                                                                                                                                                        split_node_for_info(momeutils.bn(node_parent))[-2],
-                                                                                                                                                                                                                                                                                        details))
 
-    momeutils.dj(out)
+    # filtering on relevance 
+    out = evaluate_section_relevance(name, details, None)
+    details_to_add = [d for i, d in enumerate(details) if out[i][1] > 8]
+    
+    # filtering on similarity 
+    final = evaluate_detail_sim(details_to_add, existing_details)
+    details_to_add = [d for i, d in enumerate(details_to_add) if final[i][1] < 6]
+    momeutils.dj({"final": final, 
+                  "details_to_add": details_to_add})
+    if len(details_to_add) == 0:
+        momeutils.crline('No details to add')
+        return 
+
+
+    if is_leaf(focus_node['path']):
+        momeutils.crline('Figure out what to do with leaf nodes')
+        if "additional_details" not in control_center.keys():
+            control_center['additional_details'] = []
+        control_center['additional_details'] = list(set(control_center['additional_details'] + details_to_add))
+        mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(control_center))
+        return 
+
+    for k in control_center.keys():
+        control_center[k]['additional_details'] = list(set(control_center[k]['additional_details'] + details_to_add))
+    
+    mome.update_section(focus_node['path'], 'Control center', momeutils.j_deco(control_center))
 
 def look_ahead(config_path = None, **kwargs):
 
@@ -1907,7 +2038,7 @@ def refill(config_path = None, **kwargs):
     key_id = check_matching_key(control_center, config['control_key'])
     section_structure = focus_node['structure']
     current_contents = control_center[key_id]['user_instruction']
-# def enhance_report_section(section_identifier = None, current_contents = None, initial_global_contents = None, subsection_titles = None): 
+
     results = enhance_report_section(section_identifier = key_id, 
                                     current_contents = current_contents,
                                     initial_global_contents = section_structure['initial_contents'],
